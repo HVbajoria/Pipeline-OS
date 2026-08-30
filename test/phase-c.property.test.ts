@@ -175,7 +175,14 @@ describe('Phase C correctness properties', () => {
         expect(generatedOffer.respondedAt).toBeNull();
         const isOutside =
           fixture.compAmount < compBand.min || fixture.compAmount > compBand.max;
-        expect(Boolean(generatedOffer.compensationWarning)).toBe(isOutside);
+        const expectedWarning = isOutside
+          ? `Compensation amount ${fixture.compAmount} is outside the ${compBand.currency} band of ${compBand.min}-${compBand.max}.`
+          : undefined;
+        if (expectedWarning === undefined) {
+          expect(generatedOffer.compensationWarning).toBeUndefined();
+        } else {
+          expect(generatedOffer.compensationWarning).toBe(expectedWarning);
+        }
 
         const responseContext = createTestContext({
           seed: seedWithSentOffer(),
@@ -184,6 +191,11 @@ describe('Phase C correctness properties', () => {
         const responseService = new OperationService(responseContext.repository, {
           respond_to_offer: respondToOffer
         });
+        const responseBefore = responseContext.repository.read();
+        const sentOfferBefore = responseBefore.offers.get('property-c-offer')!;
+        const applicationBefore = responseBefore.applications.get(
+          'property-c-application'
+        )!;
         const responseInput = fixture.decision === 'counter'
           ? {
               offerId: 'property-c-offer',
@@ -209,19 +221,34 @@ describe('Phase C correctness properties', () => {
             : fixture.decision === 'decline'
               ? 'declined'
               : 'countered';
+        const expectedApplicationStatus =
+          fixture.decision === 'accept'
+            ? 'offer_accepted'
+            : fixture.decision === 'decline'
+              ? 'offer_declined'
+              : 'offer_sent';
         expect(response).toEqual({
           offerId: 'property-c-offer',
           status: expectedStatus
         });
-        expect(offer.status).toBe(expectedStatus);
-        expect(offer.respondedAt).toBe(TEST_TIMESTAMP);
+        expect(offer).toEqual({
+          ...sentOfferBefore,
+          status: expectedStatus,
+          counterAmount:
+            fixture.decision === 'counter' ? fixture.counterAmount : null,
+          respondedAt: TEST_TIMESTAMP
+        });
         if (fixture.decision === 'counter') {
-          expect(offer.counterAmount).toBe(fixture.counterAmount);
-          expect(application.status).toBe('offer_sent');
+          expect(application).toEqual(applicationBefore);
+          expect(application.status).not.toBe('offer_accepted');
+          expect(application.status).not.toBe('offer_declined');
         } else {
-          expect(offer.counterAmount).toBeNull();
-          expect(application.status).toBe(
-            fixture.decision === 'accept' ? 'offer_accepted' : 'offer_declined'
+          expect(application).toEqual({
+            ...applicationBefore,
+            status: expectedApplicationStatus
+          });
+          expect(application.status).not.toBe(
+            fixture.decision === 'accept' ? 'offer_declined' : 'offer_accepted'
           );
         }
       })
@@ -273,83 +300,118 @@ describe('Phase C correctness properties', () => {
   it('Property 18: preserves catalog and post-offer record integrity', async () => {
     // Feature: pipelineos, Property 18: Catalog and post-offer record integrity
     // **Validates: Requirements 19.1, 19.2, 19.5, 20.1, 20.2, 20.4**
+    const planCatalog = createSeed().catalogs.planCatalog;
+    const validSelectionsArbitrary = fc.record({
+      medical: fc.constantFrom(...planCatalog.medical),
+      dental: fc.constantFrom(...planCatalog.dental),
+      vision: fc.constantFrom(...planCatalog.vision)
+    });
+    const invalidSelectionsArbitrary = fc.oneof(
+      fc.record({
+        medical: fc.constant('invalid-medical-plan'),
+        dental: fc.constantFrom(...planCatalog.dental),
+        vision: fc.constantFrom(...planCatalog.vision)
+      }),
+      fc.record({
+        medical: fc.constantFrom(...planCatalog.medical),
+        dental: fc.constant('invalid-dental-plan'),
+        vision: fc.constantFrom(...planCatalog.vision)
+      }),
+      fc.record({
+        medical: fc.constantFrom(...planCatalog.medical),
+        dental: fc.constantFrom(...planCatalog.dental),
+        vision: fc.constant('invalid-vision-plan')
+      })
+    );
     const fixtureArbitrary = fc.record({
       offerStatus: fc.constantFrom<OfferStatus>(...offerStatuses),
-      validSelections: fc.boolean()
+      validSelections: validSelectionsArbitrary,
+      invalidSelections: invalidSelectionsArbitrary
     });
 
     await assertAsyncProperty(
-      fc.asyncProperty(fixtureArbitrary, async ({ offerStatus, validSelections }) => {
-        const backgroundContext = createTestContext({
-          seed: seedWithSentOffer('offer_accepted', offerStatus)
-        });
-        const backgroundService = new OperationService(backgroundContext.repository, {
-          initiate_background_check: initiateBackgroundCheck
-        });
-        const backgroundBefore = backgroundContext.repository.read();
-        const backgroundPromise = backgroundService.invoke(
-          'initiate_background_check',
-          { offerId: 'property-c-offer' },
-          backgroundContext.actor
-        );
-
-        if (offerStatus === 'accepted') {
-          const output = await backgroundPromise;
-          const state = backgroundContext.repository.read();
-          const record = state.backgroundChecks.get(output.backgroundCheckId)!;
-          expect(output.status).toBe('clear');
-          expect(record).toMatchObject({
-            offerId: 'property-c-offer',
-            status: 'clear',
-            initiatedAt: TEST_TIMESTAMP,
-            completedAt: TEST_TIMESTAMP
+      fc.asyncProperty(
+        fixtureArbitrary,
+        async ({ offerStatus, validSelections, invalidSelections }) => {
+          const backgroundContext = createTestContext({
+            seed: seedWithSentOffer('offer_accepted', offerStatus)
           });
-        } else {
-          const error = await thrownError(backgroundPromise);
-          expect(error.status).toBe(409);
-          expectDomainUnchanged(backgroundBefore, backgroundContext.repository.read());
-        }
-
-        const benefitsContext = createTestContext({
-          seed: seedWithSentOffer('offer_sent', offerStatus)
-        });
-        const benefitsService = new OperationService(benefitsContext.repository, {
-          enroll_benefits: enrollBenefits
-        });
-        const planSelections = validSelections
-          ? {
-              medical: 'medical-plus',
-              dental: 'dental-basic',
-              vision: 'vision-plus'
-            }
-          : {
-              medical: 'not-a-medical-plan',
-              dental: 'dental-basic',
-              vision: 'vision-plus'
-            };
-        const benefitsBefore = benefitsContext.repository.read();
-        const benefitsPromise = benefitsService.invoke(
-          'enroll_benefits',
-          { offerId: 'property-c-offer', planSelections },
-          benefitsContext.actor
-        );
-
-        if (validSelections) {
-          const output = await benefitsPromise;
-          const record = benefitsContext.repository.read().benefitsEnrollments.get(
-            output.enrollmentId
+          const backgroundService = new OperationService(backgroundContext.repository, {
+            initiate_background_check: initiateBackgroundCheck
+          });
+          const backgroundBefore = backgroundContext.repository.read();
+          const backgroundPromise = backgroundService.invoke(
+            'initiate_background_check',
+            { offerId: 'property-c-offer' },
+            backgroundContext.actor
           );
-          expect(record).toMatchObject({
+
+          if (offerStatus === 'accepted') {
+            const output = await backgroundPromise;
+            const state = backgroundContext.repository.read();
+            const record = state.backgroundChecks.get(output.backgroundCheckId);
+
+            expect(output).toEqual({
+              backgroundCheckId: 'background-check-1',
+              status: 'clear'
+            });
+            expect(state.backgroundChecks.size).toBe(1);
+            expect(record).toEqual({
+              id: output.backgroundCheckId,
+              offerId: 'property-c-offer',
+              status: 'clear',
+              initiatedAt: TEST_TIMESTAMP,
+              completedAt: TEST_TIMESTAMP
+            });
+          } else {
+            const error = await thrownError(backgroundPromise);
+            expect(error.status).toBe(409);
+            expectDomainUnchanged(backgroundBefore, backgroundContext.repository.read());
+          }
+
+          const benefitsContext = createTestContext({
+            seed: seedWithSentOffer('offer_sent', offerStatus)
+          });
+          const benefitsService = new OperationService(benefitsContext.repository, {
+            enroll_benefits: enrollBenefits
+          });
+          const validOutput = await benefitsService.invoke(
+            'enroll_benefits',
+            { offerId: 'property-c-offer', planSelections: validSelections },
+            benefitsContext.actor
+          );
+          const benefitsState = benefitsContext.repository.read();
+          const enrollment = benefitsState.benefitsEnrollments.get(
+            validOutput.enrollmentId
+          );
+
+          expect(validOutput).toEqual({ enrollmentId: 'benefits-1' });
+          expect(benefitsState.benefitsEnrollments.size).toBe(1);
+          expect(enrollment).toEqual({
+            id: validOutput.enrollmentId,
             offerId: 'property-c-offer',
-            planSelections,
+            planSelections: validSelections,
             enrolledAt: TEST_TIMESTAMP
           });
-        } else {
-          const error = await thrownError(benefitsPromise);
-          expect(error.status).toBe(400);
-          expectDomainUnchanged(benefitsBefore, benefitsContext.repository.read());
+
+          const invalidContext = createTestContext({
+            seed: seedWithSentOffer('offer_sent', offerStatus)
+          });
+          const invalidService = new OperationService(invalidContext.repository, {
+            enroll_benefits: enrollBenefits
+          });
+          const invalidBefore = invalidContext.repository.read();
+          const invalidPromise = invalidService.invoke(
+            'enroll_benefits',
+            { offerId: 'property-c-offer', planSelections: invalidSelections },
+            invalidContext.actor
+          );
+          const invalidError = await thrownError(invalidPromise);
+
+          expect(invalidError.status).toBe(400);
+          expectDomainUnchanged(invalidBefore, invalidContext.repository.read());
         }
-      })
+      )
     );
   });
 
@@ -357,9 +419,13 @@ describe('Phase C correctness properties', () => {
     // Feature: pipelineos, Property 19: Onboarding task and status calculation
     // **Validates: Requirements 21.1, 21.3, 21.4, 21.5, 22.1, 22.2, 22.3**
     const templates = createSeed().catalogs.roleTemplates;
+    const taskStatuses = ['pending', 'in_progress', 'complete'] as const;
     const fixtureArbitrary = fc.record({
       templateIndex: fc.integer({ min: 0, max: templates.length - 1 }),
-      completedFlags: fc.array(fc.boolean(), { maxLength: 3 }),
+      taskStatuses: fc.array(fc.constantFrom(...taskStatuses), {
+        minLength: 3,
+        maxLength: 3
+      }),
       hasBackgroundCheck: fc.boolean(),
       backgroundStatus: fc.constantFrom<BackgroundCheckStatus>(...backgroundStatuses),
       hasBenefits: fc.boolean()
@@ -378,7 +444,11 @@ describe('Phase C correctness properties', () => {
           requirements: isGeneric ? ['Coordination'] : [template.roleMatcher]
         };
         seed.jobs = new Map([[job.id, job]]);
-        const application = applicationFixture('offer_accepted', 'property-onboarding-application', job.id);
+        const application = applicationFixture(
+          'offer_accepted',
+          'property-onboarding-application',
+          job.id
+        );
         const offer = offerFixture(
           'accepted',
           application.id,
@@ -422,67 +492,115 @@ describe('Phase C correctness properties', () => {
           generate_onboarding_checklist: generateOnboardingChecklist,
           get_onboarding_status: getOnboardingStatus
         });
+
+        const referenceStatus = (
+          state: ReturnType<typeof context.repository.read>
+        ) => {
+          const relatedTasks = [...state.onboardingTasks.values()].filter(
+            (task) => task.offerId === offer.id
+          );
+          const done = relatedTasks.filter((task) => task.status === 'complete').length;
+          const total = relatedTasks.length;
+          return {
+            backgroundCheckStatus:
+              [...state.backgroundChecks.values()].find(
+                (record) => record.offerId === offer.id
+              )?.status ?? null,
+            benefitsEnrolled: [...state.benefitsEnrollments.values()].some(
+              (record) => record.offerId === offer.id
+            ),
+            taskCompletion: { done, total },
+            completionPercentage: total === 0 ? 0 : (done / total) * 100
+          };
+        };
+
+        // Before checklist generation there are no tasks, so the reference
+        // calculation explicitly covers the required zero-total case.
+        const initialStatus = await service.invoke(
+          'get_onboarding_status',
+          { offerId: offer.id },
+          context.actor
+        );
+        expect(initialStatus).toEqual(referenceStatus(context.repository.read()));
+        expect(initialStatus).toEqual({
+          backgroundCheckStatus: fixture.hasBackgroundCheck
+            ? fixture.backgroundStatus
+            : null,
+          benefitsEnrolled: fixture.hasBenefits,
+          taskCompletion: { done: 0, total: 0 },
+          completionPercentage: 0
+        });
+
         const checklist = await service.invoke(
           'generate_onboarding_checklist',
           { offerId: offer.id },
           context.actor
         );
-        const expectedSchedule = scheduleOnboardingTasks(
-          template,
-          context.repository.read().catalogs.startDate
-        );
+        const startDate = context.repository.read().catalogs.startDate;
+        const expectedSchedule = template.onboardingTasks.map(({ taskName, offsetDays }) => ({
+          taskName,
+          dueDate: new Date(
+            Date.parse(startDate) + offsetDays * 24 * 60 * 60 * 1000
+          ).toISOString()
+        }));
+        // Keep the pure helper aligned with an independent offset calculation.
+        expect(scheduleOnboardingTasks(template, startDate)).toEqual(expectedSchedule);
+        expect(checklist.tasks).toHaveLength(template.onboardingTasks.length);
         expect(checklist.tasks.map(({ taskName, dueDate }) => ({ taskName, dueDate }))).toEqual(
           expectedSchedule
         );
-        expect(context.repository.read().applications.get(application.id)?.status).toBe(
+        expect(
+          new Set(checklist.tasks.map(({ taskId }) => taskId)).size
+        ).toBe(template.onboardingTasks.length);
+
+        const postChecklistState = context.repository.read();
+        const generatedTasks = [...postChecklistState.onboardingTasks.values()].filter(
+          (task) => task.offerId === offer.id
+        );
+        expect(generatedTasks.map(({ id, taskName, status, dueDate }) => ({
+          id,
+          taskName,
+          status,
+          dueDate
+        }))).toEqual(
+          checklist.tasks.map(({ taskId, taskName, dueDate }) => ({
+            id: taskId,
+            taskName,
+            status: 'pending',
+            dueDate
+          }))
+        );
+        expect(postChecklistState.applications.get(application.id)?.status).toBe(
           'onboarding'
         );
 
         const taskIds = checklist.tasks.map(({ taskId }) => taskId);
+        const statusesForTemplate = fixture.taskStatuses.slice(
+          0,
+          template.onboardingTasks.length
+        );
         context.repository.transact((draft) => {
           taskIds.forEach((taskId, index) => {
-            if (fixture.completedFlags[index] === true) {
-              draft.onboardingTasks.get(taskId)!.status = 'complete';
-            }
+            draft.onboardingTasks.get(taskId)!.status = statusesForTemplate[index];
           });
         });
+
+        const finalState = context.repository.read();
+        const expectedStatus = referenceStatus(finalState);
+        expect(
+          calculateOnboardingStatus({
+            offerId: offer.id,
+            backgroundChecks: [...finalState.backgroundChecks.values()],
+            benefitsEnrollments: [...finalState.benefitsEnrollments.values()],
+            tasks: [...finalState.onboardingTasks.values()]
+          })
+        ).toEqual(expectedStatus);
 
         const status = await service.invoke(
           'get_onboarding_status',
           { offerId: offer.id },
           context.actor
         );
-        const taskRecords = [...context.repository.read().onboardingTasks.values()];
-        const expectedStatus = calculateOnboardingStatus({
-          offerId: offer.id,
-          backgroundChecks: fixture.hasBackgroundCheck
-            ? [
-                {
-                  id: 'property-background',
-                  offerId: offer.id,
-                  status: fixture.backgroundStatus,
-                  initiatedAt: TEST_TIMESTAMP,
-                  completedAt:
-                    fixture.backgroundStatus === 'pending' ? null : TEST_TIMESTAMP
-                }
-              ]
-            : [],
-          benefitsEnrollments: fixture.hasBenefits
-            ? [
-                {
-                  id: 'property-benefits',
-                  offerId: offer.id,
-                  planSelections: {
-                    medical: 'medical-basic',
-                    dental: 'dental-basic',
-                    vision: 'vision-basic'
-                  },
-                  enrolledAt: TEST_TIMESTAMP
-                }
-              ]
-            : [],
-          tasks: taskRecords
-        });
         expect(status).toEqual(expectedStatus);
       })
     );

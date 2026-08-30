@@ -150,7 +150,9 @@ export function calculateOnboardingStatus(
   const backgroundCheck = (inputs.backgroundChecks ?? []).find(
     (record) => record.offerId === inputs.offerId
   );
-  const tasks = inputs.tasks ?? [];
+  const tasks = (inputs.tasks ?? []).filter(
+    (task) => task.offerId === inputs.offerId
+  );
   const taskCompletion = calculateTaskCompletion(tasks);
   return {
     backgroundCheckStatus: backgroundCheck?.status ?? null,

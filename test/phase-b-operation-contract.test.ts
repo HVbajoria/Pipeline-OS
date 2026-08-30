@@ -77,6 +77,15 @@ function expectSingleAudit(
   expect(state.revision).toBe(1);
 }
 
+function expectSingleFailureAudit(
+  repository: ReturnType<typeof createTestContext>['repository'],
+  operation: string,
+  input: Record<string, unknown>,
+  error: PipelineError
+): void {
+  expectSingleAudit(repository, operation, input, error.toPayload());
+}
+
 async function captureError<T>(promise: Promise<T>): Promise<PipelineError> {
   try {
     await promise;
@@ -215,7 +224,7 @@ describe('Phase B operation contracts, errors, activity, and state', () => {
       )
     );
     expect(noPanelError.status).toBe(404);
-    expect(noPanelContext.repository.read().interviews).toHaveLength(0);
+    expect(noPanelContext.repository.read().interviews.size).toBe(0);
     expect(noPanelContext.repository.read().activityLog).toHaveLength(1);
   });
 
@@ -259,6 +268,63 @@ describe('Phase B operation contracts, errors, activity, and state', () => {
     expect(domainSnapshot(repository.read())).toEqual(domainSnapshot(before));
     expect(repository.read().activityLog).toHaveLength(1);
     expect(repository.read().activityLog[0].output).toEqual(error.toPayload());
+  });
+
+  it('returns 400 for malformed slots and 404 for missing applications before mutating booking state', async () => {
+    const malformed = seedWithApplicationAndInterviews();
+    const malformedContext = createTestContext({ seed: malformed.seed });
+    const malformedService = new OperationService(
+      malformedContext.repository,
+      phaseBHandlers
+    );
+    const malformedInput = {
+      applicationId: malformed.application.id,
+      slot: 'not-a-timestamp'
+    };
+    const malformedBefore = malformedContext.repository.read();
+    const malformedError = await captureError(
+      malformedService.invoke(
+        'book_interview',
+        malformedInput,
+        malformedContext.actor
+      )
+    );
+
+    expect(malformedError.status).toBe(400);
+    expect(domainSnapshot(malformedContext.repository.read())).toEqual(
+      domainSnapshot(malformedBefore)
+    );
+    expectSingleFailureAudit(
+      malformedContext.repository,
+      'book_interview',
+      malformedInput,
+      malformedError
+    );
+
+    const missingContext = createTestContext();
+    const missingService = new OperationService(
+      missingContext.repository,
+      phaseBHandlers
+    );
+    const missingInput = {
+      applicationId: 'missing-application',
+      slot: '2026-09-01T10:00:00Z'
+    };
+    const missingBefore = missingContext.repository.read();
+    const missingError = await captureError(
+      missingService.invoke('book_interview', missingInput, missingContext.actor)
+    );
+
+    expect(missingError.status).toBe(404);
+    expect(domainSnapshot(missingContext.repository.read())).toEqual(
+      domainSnapshot(missingBefore)
+    );
+    expectSingleFailureAudit(
+      missingContext.repository,
+      'book_interview',
+      missingInput,
+      missingError
+    );
   });
 
   it('returns 409 rather than skipping lifecycle stages while booking', async () => {
@@ -478,5 +544,156 @@ describe('Phase B operation contracts, errors, activity, and state', () => {
       )
     );
     expect(missingError.status).toBe(404);
+  });
+
+  it('audits one structured failure for every Phase B operation and preserves domain state', async () => {
+    const availabilityContext = createTestContext();
+    const availabilityService = new OperationService(
+      availabilityContext.repository,
+      phaseBHandlers
+    );
+    const availabilityInput = {
+      panelId: 'missing-panel',
+      dateRange: {
+        start: '2026-09-01T00:00:00Z',
+        end: '2026-09-02T00:00:00Z'
+      }
+    };
+    const availabilityBefore = availabilityContext.repository.read();
+    const availabilityError = await captureError(
+      availabilityService.invoke(
+        'check_interviewer_availability',
+        availabilityInput,
+        availabilityContext.actor
+      )
+    );
+    expect(availabilityError.status).toBe(404);
+    expect(domainSnapshot(availabilityContext.repository.read())).toEqual(
+      domainSnapshot(availabilityBefore)
+    );
+    expectSingleFailureAudit(
+      availabilityContext.repository,
+      'check_interviewer_availability',
+      availabilityInput,
+      availabilityError
+    );
+
+    const proposalContext = createTestContext();
+    const proposalService = new OperationService(
+      proposalContext.repository,
+      phaseBHandlers
+    );
+    const proposalInput = { applicationId: 'missing-application' };
+    const proposalBefore = proposalContext.repository.read();
+    const proposalError = await captureError(
+      proposalService.invoke(
+        'propose_interview_slots',
+        proposalInput,
+        proposalContext.actor
+      )
+    );
+    expect(proposalError.status).toBe(404);
+    expect(domainSnapshot(proposalContext.repository.read())).toEqual(
+      domainSnapshot(proposalBefore)
+    );
+    expectSingleFailureAudit(
+      proposalContext.repository,
+      'propose_interview_slots',
+      proposalInput,
+      proposalError
+    );
+
+    const bookingContext = createTestContext();
+    const bookingService = new OperationService(
+      bookingContext.repository,
+      phaseBHandlers
+    );
+    const bookingInput = {
+      applicationId: 'missing-application',
+      slot: '2026-09-01T10:00:00Z'
+    };
+    const bookingBefore = bookingContext.repository.read();
+    const bookingError = await captureError(
+      bookingService.invoke('book_interview', bookingInput, bookingContext.actor)
+    );
+    expect(bookingError.status).toBe(404);
+    expect(domainSnapshot(bookingContext.repository.read())).toEqual(
+      domainSnapshot(bookingBefore)
+    );
+    expectSingleFailureAudit(
+      bookingContext.repository,
+      'book_interview',
+      bookingInput,
+      bookingError
+    );
+
+    const kitContext = createTestContext();
+    const kitService = new OperationService(kitContext.repository, phaseBHandlers);
+    const kitInput = { jobId: 'missing-job' };
+    const kitBefore = kitContext.repository.read();
+    const kitError = await captureError(
+      kitService.invoke('get_interview_kit', kitInput, kitContext.actor)
+    );
+    expect(kitError.status).toBe(404);
+    expect(domainSnapshot(kitContext.repository.read())).toEqual(
+      domainSnapshot(kitBefore)
+    );
+    expectSingleFailureAudit(kitContext.repository, 'get_interview_kit', kitInput, kitError);
+
+    const feedbackContext = createTestContext();
+    const feedbackService = new OperationService(
+      feedbackContext.repository,
+      phaseBHandlers
+    );
+    const feedbackInput = {
+      interviewId: 'missing-interview',
+      interviewer: 'interviewer-1',
+      competencyScores: { design: 4 },
+      recommendation: 'yes' as const,
+      comments: 'Comments'
+    };
+    const feedbackBefore = feedbackContext.repository.read();
+    const feedbackError = await captureError(
+      feedbackService.invoke(
+        'submit_interview_feedback',
+        feedbackInput,
+        feedbackContext.actor
+      )
+    );
+    expect(feedbackError.status).toBe(404);
+    expect(domainSnapshot(feedbackContext.repository.read())).toEqual(
+      domainSnapshot(feedbackBefore)
+    );
+    expectSingleFailureAudit(
+      feedbackContext.repository,
+      'submit_interview_feedback',
+      feedbackInput,
+      feedbackError
+    );
+
+    const summaryContext = createTestContext();
+    const summaryService = new OperationService(
+      summaryContext.repository,
+      phaseBHandlers
+    );
+    const summaryInput = { applicationId: 'missing-application' };
+    const summaryBefore = summaryContext.repository.read();
+    const summaryError = await captureError(
+      summaryService.invoke(
+        'get_panel_feedback_summary',
+        summaryInput,
+        summaryContext.actor
+      )
+    );
+    expect(summaryError.status).toBe(404);
+    expect(domainSnapshot(summaryContext.repository.read())).toEqual(
+      domainSnapshot(summaryBefore)
+    );
+    expectSingleFailureAudit(
+      summaryContext.repository,
+      'get_panel_feedback_summary',
+      summaryInput,
+      summaryError
+    );
   });
 });

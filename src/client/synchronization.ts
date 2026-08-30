@@ -99,6 +99,8 @@ export class SynchronizationController {
   private stopped = true;
   private queuedRevision = 0;
   private drainPromise: Promise<void> | null = null;
+  private startPromise: Promise<SharedStateProjectionWithCatalogs> | null = null;
+  private generation = 0;
   private readonly eventHandler = (event: MessageEvent<string>) => {
     this.queueRevision(revisionFromEvent(event));
   };
@@ -108,13 +110,37 @@ export class SynchronizationController {
   }
 
   async start(): Promise<SharedStateProjectionWithCatalogs> {
+    if (this.startPromise) return this.startPromise;
     if (!this.stopped) {
       return useStore.getState().snapshot();
     }
+
     this.stopped = false;
-    const projection = await refreshSharedState(this.options);
-    this.connectEvents();
-    return projection;
+    const generation = ++this.generation;
+    let startup: Promise<SharedStateProjectionWithCatalogs>;
+    startup = fetchProjection(this.options)
+      .then((projection) => {
+        // A StrictMode cleanup or an explicit stop may have happened while
+        // the initial request was in flight. Do not hydrate or reconnect a
+        // controller that is no longer the active lifecycle instance.
+        if (this.isCurrent(generation)) {
+          useStore.getState().hydrate(projection);
+          this.connectEvents();
+        }
+        return projection;
+      })
+      .catch((error) => {
+        if (this.isCurrent(generation)) {
+          this.stopped = true;
+          this.queuedRevision = 0;
+        }
+        throw error;
+      })
+      .finally(() => {
+        if (this.startPromise === startup) this.startPromise = null;
+      });
+    this.startPromise = startup;
+    return startup;
   }
 
   async refresh(): Promise<SharedStateProjectionWithCatalogs> {
@@ -123,14 +149,27 @@ export class SynchronizationController {
 
   stop(): void {
     this.stopped = true;
+    this.generation += 1;
     this.queuedRevision = 0;
+    // An in-flight drain checks its captured generation before installing a
+    // projection. Clear the handle so a subsequent start can schedule its own
+    // drain without being blocked by the old request.
+    this.drainPromise = null;
+    this.startPromise = null;
     if (this.source) {
       if (this.source.removeEventListener) {
         this.source.removeEventListener('state_changed', this.eventHandler);
+      } else {
+        this.source.onmessage = null;
       }
+      this.source.onerror = null;
       this.source.close();
       this.source = null;
     }
+  }
+
+  private isCurrent(generation: number): boolean {
+    return !this.stopped && generation === this.generation;
   }
 
   private connectEvents(): void {
@@ -151,22 +190,58 @@ export class SynchronizationController {
   }
 
   private queueRevision(revision: number): void {
-    if (this.stopped || revision <= useStore.getState().revision) return;
-    this.queuedRevision = Math.max(this.queuedRevision, revision);
-    if (!this.drainPromise) {
-      this.drainPromise = this.drain().finally(() => {
-        this.drainPromise = null;
-        if (!this.stopped && this.queuedRevision > useStore.getState().revision) {
-          this.queueRevision(this.queuedRevision);
-        }
-      });
+    if (
+      this.stopped ||
+      !Number.isInteger(revision) ||
+      revision <= useStore.getState().revision
+    ) {
+      return;
     }
+    this.queuedRevision = Math.max(this.queuedRevision, revision);
+    this.scheduleDrain();
   }
 
-  private async drain(): Promise<void> {
-    while (!this.stopped && this.queuedRevision > useStore.getState().revision) {
-      this.queuedRevision = 0;
-      await refreshSharedState(this.options);
+  private scheduleDrain(): void {
+    if (this.drainPromise || this.stopped) return;
+    const generation = this.generation;
+    const drain = this.drain(generation).catch(() => {
+      // Keep the requested revision queued. A subsequent SSE notification can
+      // retry a transient state request without turning an event callback into
+      // an unhandled rejection.
+    });
+    let tracked: Promise<void>;
+    tracked = drain.finally(() => {
+      if (this.drainPromise === tracked) this.drainPromise = null;
+    });
+    this.drainPromise = tracked;
+  }
+
+  private async drain(generation: number): Promise<void> {
+    while (this.isCurrent(generation)) {
+      const requestedRevision = this.queuedRevision;
+      const currentRevision = useStore.getState().revision;
+      if (requestedRevision <= currentRevision) {
+        this.queuedRevision = 0;
+        return;
+      }
+
+      const projection = await fetchProjection(this.options);
+      if (!this.isCurrent(generation)) return;
+
+      // A concurrent operation-client refresh can install a newer snapshot;
+      // never let an older SSE-triggered response regress the store.
+      if (projection.revision >= useStore.getState().revision) {
+        useStore.getState().hydrate(projection);
+      }
+
+      const observedRevision = useStore.getState().revision;
+      if (this.queuedRevision <= observedRevision) {
+        this.queuedRevision = 0;
+        return;
+      }
+      // The server returned a snapshot older than the revision announced by
+      // SSE. Keep the target queued and request again until the same snapshot
+      // boundary is visible to every view.
     }
   }
 }

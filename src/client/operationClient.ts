@@ -31,6 +31,10 @@ export interface OperationClientOptions {
   refreshState?: () => Promise<unknown>;
 }
 
+function normalizeBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, '');
+}
+
 function resolveActor(
   actor: ActorContext | undefined,
   configured: OperationClientOptions['actorContext']
@@ -77,14 +81,20 @@ export class OperationClient {
   private readonly refreshState: () => Promise<unknown>;
 
   constructor(options: OperationClientOptions = {}) {
-    this.baseUrl = options.baseUrl ?? '';
+    this.baseUrl = normalizeBaseUrl(options.baseUrl ?? '');
     const browserFetch = globalThis.fetch;
     if (!options.fetcher && typeof browserFetch !== 'function') {
       throw new Error('OperationClient requires a fetch implementation');
     }
     this.fetcher = options.fetcher ?? browserFetch.bind(globalThis);
     this.configuredActor = options.actorContext;
-    this.refreshState = options.refreshState ?? refreshSharedState;
+    this.refreshState =
+      options.refreshState ??
+      (() =>
+        refreshSharedState({
+          baseUrl: this.baseUrl,
+          fetcher: this.fetcher
+        }));
   }
 
   /** Make a client for a fixed human role without changing shared state. */
@@ -121,6 +131,7 @@ export class OperationClient {
         {
           method: 'POST',
           headers: {
+            accept: 'application/json',
             'content-type': 'application/json',
             'x-actor-type': resolvedActor.actorType,
             'x-actor-id': resolvedActor.actorId
@@ -136,6 +147,9 @@ export class OperationClient {
       if (body === undefined || body === null || typeof body !== 'object') {
         throw new InternalError(`Operation ${name} returned an invalid response`);
       }
+      if ('error' in body) {
+        throw PipelineError.from(body as PipelineErrorPayload);
+      }
       result = body as OperationOutput<N>;
     } catch (error) {
       failure = PipelineError.from(error);
@@ -147,7 +161,7 @@ export class OperationClient {
     try {
       await this.refreshState();
     } catch (refreshError) {
-      if (failure === undefined) failure = refreshError;
+      if (failure === undefined) failure = PipelineError.from(refreshError);
     }
 
     if (failure !== undefined) throw failure;

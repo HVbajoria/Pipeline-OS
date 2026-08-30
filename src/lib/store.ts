@@ -87,26 +87,41 @@ async function assertResponse(response: Response): Promise<unknown> {
   return body;
 }
 
+/**
+ * Keep the client projection isolated from response objects and callers of
+ * `snapshot()`. The server projection is JSON-safe, so structuredClone is the
+ * preferred path with a JSON fallback for older browser/test runtimes.
+ */
+function cloneProjection(
+  snapshot: SharedStateProjectionWithCatalogs
+): SharedStateProjectionWithCatalogs {
+  if (typeof globalThis.structuredClone === 'function') {
+    return globalThis.structuredClone(snapshot);
+  }
+  return JSON.parse(JSON.stringify(snapshot)) as SharedStateProjectionWithCatalogs;
+}
+
 export const useStore = create<StoreState>((set, get) => ({
   ...INITIAL_STATE,
   roleActors: ROLE_ACTOR_IDS,
   currentRole: 'recruiter',
   setRole: (role) => set({ currentRole: role }),
   hydrate: (snapshot) => {
+    const next = cloneProjection(snapshot);
     set({
-      revision: snapshot.revision,
-      jobs: snapshot.jobs,
-      candidates: snapshot.candidates,
-      applications: snapshot.applications,
-      panels: snapshot.panels,
-      interviews: snapshot.interviews,
-      scorecards: snapshot.scorecards,
-      offers: snapshot.offers,
-      onboardingTasks: snapshot.onboardingTasks,
-      backgroundChecks: snapshot.backgroundChecks,
-      benefitsEnrollments: snapshot.benefitsEnrollments,
-      activityLog: snapshot.activityLog,
-      catalogs: snapshot.catalogs
+      revision: next.revision,
+      jobs: next.jobs,
+      candidates: next.candidates,
+      applications: next.applications,
+      panels: next.panels,
+      interviews: next.interviews,
+      scorecards: next.scorecards,
+      offers: next.offers,
+      onboardingTasks: next.onboardingTasks,
+      backgroundChecks: next.backgroundChecks,
+      benefitsEnrollments: next.benefitsEnrollments,
+      activityLog: next.activityLog,
+      catalogs: next.catalogs
     });
   },
   fetchState: async () => {
@@ -131,7 +146,7 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   snapshot: () => {
     const state = get();
-    return {
+    return cloneProjection({
       revision: state.revision,
       jobs: state.jobs,
       candidates: state.candidates,
@@ -145,7 +160,7 @@ export const useStore = create<StoreState>((set, get) => ({
       benefitsEnrollments: state.benefitsEnrollments,
       activityLog: state.activityLog,
       catalogs: state.catalogs
-    };
+    });
   }
 }));
 

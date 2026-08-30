@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as fc from 'fast-check';
 import type {
   ApplicationRecord,
+  DateRange,
   InterviewPanel,
   InterviewRecord,
   ScorecardRecord,
@@ -44,12 +45,39 @@ const nonBlankTextArbitrary = fc
   .string({ minLength: 1, maxLength: 24 })
   .filter((value) => value.trim().length > 0);
 
-function referenceIntersection(calendars: readonly (readonly Timestamp[])[]): Timestamp[] {
-  const [first, ...remaining] = calendars;
+function referenceIntersection(
+  calendars: readonly (readonly Timestamp[])[],
+  dateRange?: DateRange
+): Timestamp[] {
+  const [first] = calendars;
   if (first === undefined) return [];
-  return [...new Set(first)]
-    .filter((slot) => remaining.every((calendar) => calendar.includes(slot)))
-    .sort((left, right) => Date.parse(left) - Date.parse(right));
+
+  const start = dateRange === undefined ? Number.NEGATIVE_INFINITY : Date.parse(dateRange.start);
+  const end = dateRange === undefined ? Number.POSITIVE_INFINITY : Date.parse(dateRange.end);
+  const toTimestampSet = (slots: readonly Timestamp[]) => {
+    const unique = new Map<number, Timestamp>();
+    for (const slot of slots) {
+      const millis = Date.parse(slot);
+      if (
+        Number.isFinite(millis) &&
+        millis >= start &&
+        millis < end &&
+        !unique.has(millis)
+      ) {
+        unique.set(millis, slot);
+      }
+    }
+    return unique;
+  };
+
+  const sets = calendars.map(toTimestampSet);
+  const firstSet = sets[0];
+  if (firstSet === undefined || sets.some((set) => set.size === 0)) return [];
+
+  return [...firstSet.entries()]
+    .filter(([millis]) => sets.slice(1).every((set) => set.has(millis)))
+    .sort(([left], [right]) => left - right)
+    .map(([, slot]) => slot);
 }
 
 function createPanel(
@@ -104,44 +132,85 @@ const calendarCollectionArbitrary = fc.array(
   { minLength: 3, maxLength: 3 }
 );
 
+const AVAILABILITY_SLOT_POOL: readonly Timestamp[] = [
+  '2026-08-31T23:00:00Z',
+  '2026-09-01T00:00:00Z',
+  '2026-09-01T09:00:00Z',
+  '2026-09-01T10:00:00Z',
+  '2026-09-02T09:00:00Z',
+  '2026-09-02T10:00:00Z',
+  '2026-09-03T11:00:00Z',
+  '2026-09-04T00:00:00Z',
+  '2026-09-04T01:00:00Z',
+  '2026-09-05T09:00:00Z'
+];
+const availabilitySlotArbitrary = fc.constantFrom(...AVAILABILITY_SLOT_POOL);
+const availabilityRangeBoundaries: readonly Timestamp[] = [
+  '2026-08-31T00:00:00Z',
+  '2026-09-01T00:00:00Z',
+  '2026-09-02T00:00:00Z',
+  '2026-09-03T00:00:00Z',
+  '2026-09-04T00:00:00Z',
+  '2026-09-05T00:00:00Z'
+];
+const availabilityDateRangeArbitrary = fc
+  .integer({ min: 0, max: availabilityRangeBoundaries.length - 2 })
+  .chain((startIndex) =>
+    fc
+      .integer({ min: startIndex + 1, max: availabilityRangeBoundaries.length - 1 })
+      .map((endIndex) => ({
+        start: availabilityRangeBoundaries[startIndex],
+        end: availabilityRangeBoundaries[endIndex]
+      }))
+  );
+const availabilityCalendarCollectionArbitrary = fc.array(
+  fc.uniqueArray(availabilitySlotArbitrary, {
+    maxLength: AVAILABILITY_SLOT_POOL.length
+  }),
+  { minLength: 3, maxLength: 3 }
+);
+
 describe('Phase B correctness properties', () => {
-  it('Property 11: returns the reference intersection of every panel calendar', async () => {
+  it('Property 11: returns the reference intersection of every panel calendar in range', async () => {
     // Feature: pipelineos, Property 11: Common availability intersection
     // **Validates: Requirements 10.1, 10.2**
     await assertAsyncProperty(
-      fc.asyncProperty(calendarCollectionArbitrary, async (calendars) => {
-        const seed = seedWithPanelAndCalendars(calendars);
-        const { repository, actor } = createTestContext({ seed });
-        const service = new OperationService(repository, {
-          check_interviewer_availability: checkInterviewerAvailability
-        });
-        const output = await service.invoke(
-          'check_interviewer_availability',
-          {
-            panelId: 'property-panel',
-            dateRange: {
-              start: '2026-09-01T00:00:00Z',
-              end: '2026-09-04T00:00:00Z'
-            }
-          },
-          actor
-        );
+      fc.asyncProperty(
+        availabilityCalendarCollectionArbitrary,
+        availabilityDateRangeArbitrary,
+        async (calendars, dateRange) => {
+          const seed = seedWithPanelAndCalendars(calendars);
+          const { repository, actor } = createTestContext({ seed });
+          const service = new OperationService(repository, {
+            check_interviewer_availability: checkInterviewerAvailability
+          });
+          const output = await service.invoke(
+            'check_interviewer_availability',
+            {
+              panelId: 'property-panel',
+              dateRange
+            },
+            actor
+          );
 
-        const expected = referenceIntersection(calendars);
-        expect(output.commonFreeSlots).toEqual(expected);
-        expect(output.commonFreeSlots).toEqual(
-          [...output.commonFreeSlots].sort(
-            (left, right) => Date.parse(left) - Date.parse(right)
-          )
-        );
-        expect(
-          output.commonFreeSlots.every(
-            (slot) =>
-              Date.parse(slot) >= Date.parse('2026-09-01T00:00:00Z') &&
-              Date.parse(slot) < Date.parse('2026-09-04T00:00:00Z')
-          )
-        ).toBe(true);
-      })
+          const expected = referenceIntersection(calendars, dateRange);
+          expect(output.commonFreeSlots).toEqual(expected);
+          expect(output.commonFreeSlots).toEqual(
+            [...output.commonFreeSlots].sort(
+              (left, right) => Date.parse(left) - Date.parse(right)
+            )
+          );
+
+          const start = Date.parse(dateRange.start);
+          const end = Date.parse(dateRange.end);
+          expect(
+            output.commonFreeSlots.every((slot) => {
+              const millis = Date.parse(slot);
+              return Number.isFinite(millis) && millis >= start && millis < end;
+            })
+          ).toBe(true);
+        }
+      )
     );
   });
 
@@ -410,13 +479,16 @@ describe('Phase B correctness properties', () => {
         );
         const afterFeedback = repository.read();
         const submitted = afterFeedback.scorecards.get(feedbackOutput.scorecardId);
-        expect(submitted).toMatchObject({
+        const expectedScorecard: ScorecardRecord = {
+          id: feedbackOutput.scorecardId,
           interviewId: targetInterview.id,
           interviewer: target.interviewer,
           competencyScores: target.scores,
           recommendation: target.recommendation,
-          comments: target.comments
-        });
+          comments: target.comments,
+          submittedAt: TEST_TIMESTAMP
+        };
+        expect(submitted).toEqual(expectedScorecard);
         expect(afterFeedback.interviews.get(targetInterview.id)?.status).toBe('completed');
 
         const summary = await service.invoke(

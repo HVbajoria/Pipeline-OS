@@ -443,6 +443,13 @@ describe('Phase C operation contracts, errors, activity, and state', () => {
         taskName: 'Two',
         status: 'pending',
         dueDate: TEST_TIMESTAMP
+      },
+      {
+        id: 'task-other-offer',
+        offerId: 'other-offer',
+        taskName: 'Unrelated task',
+        status: 'complete',
+        dueDate: TEST_TIMESTAMP
       }
     ];
     seed.backgroundChecks = new Map([[backgroundCheck.id, backgroundCheck]]);
@@ -474,5 +481,110 @@ describe('Phase C operation contracts, errors, activity, and state', () => {
       taskCompletion: { done: 0, total: 0 },
       completionPercentage: 0
     });
+  });
+
+  it('omits the compensation warning when a draft is within the requisition band', async () => {
+    const { repository, actor } = createTestContext({
+      seed: seedWithOffer('applied').seed
+    });
+    const service = new OperationService(repository, phaseCHandlers);
+    const input = { applicationId: 'phase-c-application', compAmount: 175000 };
+    const output = await service.invoke('generate_offer', input, actor);
+    const offer = repository.read().offers.get(output.offerId);
+
+    expect(output).toEqual({ offerId: 'offer-1', status: 'draft' });
+    expect(offer).toMatchObject({
+      applicationId: input.applicationId,
+      compAmount: input.compAmount,
+      currency: 'USD',
+      status: 'draft',
+      counterAmount: null,
+      sentAt: null,
+      respondedAt: null
+    });
+    expect(offer?.compensationWarning).toBeUndefined();
+    expectSingleAudit(repository, 'generate_offer', input, output);
+  });
+
+  it.each([
+    {
+      operation: 'generate_offer',
+      input: { applicationId: 'missing-application', compAmount: 170000 }
+    },
+    { operation: 'send_offer', input: { offerId: 'missing-offer' } },
+    {
+      operation: 'respond_to_offer',
+      input: { offerId: 'missing-offer', decision: 'accept' }
+    },
+    {
+      operation: 'initiate_background_check',
+      input: { offerId: 'missing-offer' }
+    },
+    {
+      operation: 'enroll_benefits',
+      input: {
+        offerId: 'missing-offer',
+        planSelections: {
+          medical: 'medical-basic',
+          dental: 'dental-basic',
+          vision: 'vision-basic'
+        }
+      }
+    },
+    {
+      operation: 'generate_onboarding_checklist',
+      input: { offerId: 'missing-offer' }
+    },
+    {
+      operation: 'get_onboarding_status',
+      input: { offerId: 'missing-offer' }
+    }
+  ] as const)('records one exact failed audit for a missing %s reference', async ({ operation, input }) => {
+    const { repository, actor } = createTestContext();
+    const service = new OperationService(repository, phaseCHandlers);
+    const before = repository.read();
+    const error = await captureError(
+      service.invoke(operation, input as never, actor)
+    );
+    const state = repository.read();
+    const [entry] = state.activityLog;
+
+    expect(error.status).toBe(404);
+    expect(domainSnapshot(state)).toEqual(domainSnapshot(before));
+    expect(state.activityLog).toHaveLength(1);
+    expect(state.revision).toBe(1);
+    expect(entry).toMatchObject({
+      toolName: operation,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      timestamp: TEST_TIMESTAMP,
+      output: error.toPayload()
+    });
+    expect(entry.input).toEqual(input);
+  });
+
+  it('rejects sending an already-sent offer without changing either record', async () => {
+    const { seed, application, offer } = seedWithOffer('interviewing', 'sent');
+    const { repository, actor } = createTestContext({ seed });
+    const service = new OperationService(repository, phaseCHandlers);
+    const before = repository.read();
+    const input = { offerId: offer.id };
+    const error = await captureError(service.invoke('send_offer', input, actor));
+    const state = repository.read();
+
+    expect(error.status).toBe(409);
+    expect(domainSnapshot(state)).toEqual(domainSnapshot(before));
+    expect(state.offers.get(offer.id)).toEqual(offer);
+    expect(state.applications.get(application.id)?.status).toBe('interviewing');
+    expect(state.activityLog).toHaveLength(1);
+    expect(state.activityLog[0]).toMatchObject({
+      toolName: 'send_offer',
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      input,
+      output: error.toPayload(),
+      timestamp: TEST_TIMESTAMP
+    });
+    expect(state.revision).toBe(1);
   });
 });

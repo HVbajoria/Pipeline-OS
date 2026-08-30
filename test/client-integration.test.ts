@@ -212,3 +212,34 @@ describe('typed client, WebMCP, store, and synchronization integration', () => {
     }
   });
 });
+
+
+describe('OperationClient transport boundary', () => {
+  it('uses the configured transport for both the operation and authoritative refresh', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetcher: FetchLike = async (request, init) => {
+      const url = String(request);
+      calls.push({ url, init });
+      if (url.endsWith('/api/state')) {
+        return jsonResponse(serializeSharedState(new SharedStateRepository(createSeed()).read()));
+      }
+      return jsonResponse({ results: [] });
+    };
+    const client = new OperationClient({
+      baseUrl: 'https://pipeline.example.test/',
+      fetcher,
+      actorContext: actorContextForRole('candidate')
+    });
+
+    await expect(client.invoke('search_candidates', { query: 'backend' })).resolves.toEqual({ results: [] });
+
+    expect(calls.map((call) => call.url)).toEqual([
+      'https://pipeline.example.test/api/operations/search_candidates',
+      'https://pipeline.example.test/api/state'
+    ]);
+    expect(calls[0].init?.method).toBe('POST');
+    expect(new Headers(calls[0].init?.headers).get('x-actor-type')).toBe('human_ui');
+    expect(new Headers(calls[0].init?.headers).get('x-actor-id')).toBe('alice-candidate');
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ input: { query: 'backend' } });
+  });
+});
