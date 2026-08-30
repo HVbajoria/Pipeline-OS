@@ -1,0 +1,6 @@
+{
+  "name": "PipelineOS",
+  "description": "A WebMCP-Native Recruiting Platform",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
