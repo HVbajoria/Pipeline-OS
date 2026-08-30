@@ -40,6 +40,7 @@ describe('OperationService audit contract', () => {
   });
 
   it('audits exactly one success or structured-error entry for every generated invocation', async () => {
+    // Feature: pipelineos, Property 5: Exactly-once activity audit
     // **Validates: Requirements 3.1, 3.2, 3.3, 3.5, 3.6, 24.7**
     await fc.assert(
       fc.asyncProperty(actorArbitrary, fc.boolean(), async (actor, shouldFail) => {

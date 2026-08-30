@@ -1,7 +1,7 @@
 import * as fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import type { ActivityLogEntry, ApplicationRecord, ApplicationStatus } from '../src/shared/models';
-import { projectActivityEntry, projectKanban } from '../src/lib/viewModels';
+import { projectActivityFeed, projectKanban } from '../src/lib/viewModels';
 import { assertProperty, PROPERTY_TEST_OPTIONS, TEST_TIMESTAMP } from './factories';
 
 const statuses: readonly ApplicationStatus[] = [
@@ -15,84 +15,122 @@ const statuses: readonly ApplicationStatus[] = [
   'onboarding'
 ];
 
-const applicationArbitrary = fc.array(fc.constantFrom(...statuses), { maxLength: 16 }).map((values) =>
-  values.map((status, index): ApplicationRecord => ({
-    id: `application-${index}`,
-    candidateId: `candidate-${index}`,
-    jobId: 'job-1',
-    status,
-    screeningScore: status === 'applied' ? null : 80,
-    screeningRationale: status === 'applied' ? null : 'Matched seeded requirements',
-    notes: [],
-    createdAt: TEST_TIMESTAMP
+const nonEmptyTextArbitrary = fc
+  .string({ minLength: 1, maxLength: 40 })
+  .filter((value) => value.trim().length > 0);
+
+const applicationArbitrary = fc
+  .array(fc.constantFrom(...statuses), { minLength: 1, maxLength: 16 })
+  .map((values) =>
+    values.map((status, index): ApplicationRecord => ({
+      id: `application-${index}`,
+      candidateId: `candidate-${index}`,
+      jobId: 'job-1',
+      status,
+      screeningScore: status === 'applied' ? null : 80,
+      screeningRationale: status === 'applied' ? null : 'Matched seeded requirements',
+      notes: [],
+      createdAt: TEST_TIMESTAMP
+    }))
+  );
+
+const activityOutputArbitrary = fc.oneof(
+  fc.record({
+    result: nonEmptyTextArbitrary,
+    count: fc.nat({ max: 100 }),
+    accepted: fc.boolean()
+  }),
+  nonEmptyTextArbitrary.map((message) => ({
+    error: {
+      code: 'VALIDATION_ERROR' as const,
+      status: 400 as const,
+      message
+    }
+  })),
+  nonEmptyTextArbitrary.map((message) => ({
+    error: {
+      code: 'NOT_FOUND_ERROR' as const,
+      status: 404 as const,
+      message
+    }
+  })),
+  nonEmptyTextArbitrary.map((message) => ({
+    error: {
+      code: 'CONFLICT_ERROR' as const,
+      status: 409 as const,
+      message
+    }
   }))
 );
+
+const activityEntryArbitrary: fc.Arbitrary<ActivityLogEntry> = fc.record({
+  id: nonEmptyTextArbitrary,
+  toolName: nonEmptyTextArbitrary,
+  actorType: fc.constantFrom('human_ui' as const, 'agent' as const),
+  actorId: nonEmptyTextArbitrary,
+  input: fc.oneof(
+    fc.record({ query: nonEmptyTextArbitrary }),
+    fc.record({ applicationId: nonEmptyTextArbitrary }),
+    fc.record({ includeArchived: fc.boolean(), limit: fc.nat({ max: 10 }) })
+  ),
+  output: activityOutputArbitrary,
+  timestamp: nonEmptyTextArbitrary
+});
+
+const activityEntriesArbitrary = fc.array(activityEntryArbitrary, {
+  minLength: 1,
+  maxLength: 16
+});
 
 // Feature: pipelineos, Property 21: UI projection mappings
 // **Validates: Requirements 25.3, 25.4**
 describe('Property 21: UI projection mappings', () => {
-  it('places every application in exactly its persisted lifecycle column', () => {
+  it('maps persisted lifecycle and activity fields through the Kanban and feed view models', () => {
     assertProperty(
-      fc.property(applicationArbitrary, (applications) => {
-        const columns = projectKanban(applications);
-        expect(columns).toHaveLength(statuses.length);
-        for (const application of applications) {
-          const matches = columns.filter((column) => column.applications.some((item) => item.id === application.id));
-          expect(matches).toHaveLength(1);
-          expect(matches[0].status).toBe(application.status);
-        }
-        expect(columns.flatMap((column) => column.applications).map((item) => item.id).sort()).toEqual(
-          applications.map((item) => item.id).sort()
-        );
-      })
-    );
-  });
+      fc.property(
+        applicationArbitrary,
+        activityEntriesArbitrary,
+        (applications, entries) => {
+          const columns = projectKanban(applications);
+          expect(columns.map((column) => column.status)).toEqual(statuses);
+          expect(columns.map((column) => column.label)).toEqual(
+            statuses.map((status) => status.replaceAll('_', ' '))
+          );
 
-  it('retains operation, actor, input, output/error, and timestamp feed fields', () => {
-    const entryArbitrary = fc.oneof(
-      fc.record({ ok: fc.boolean() }).map((output) => ({
-        id: 'activity-success',
-        toolName: 'search_candidates',
-        actorType: 'human_ui' as const,
-        actorId: 'sarah-recruiter',
-        input: { query: 'backend' },
-        output,
-        timestamp: TEST_TIMESTAMP
-      } satisfies ActivityLogEntry)),
-      fc.record({ message: fc.string({ minLength: 1 }) }).map((details) => ({
-        id: 'activity-error',
-        toolName: 'screen_candidate',
-        actorType: 'agent' as const,
-        actorId: 'agent-demo',
-        input: { applicationId: 'application-1' },
-        output: {
-          error: {
-            code: 'CONFLICT_ERROR',
-            status: 409,
-            message: details.message
+          for (const application of applications) {
+            const matchingColumns = columns.filter((column) =>
+              column.applications.some((item) => item.id === application.id)
+            );
+            expect(matchingColumns).toHaveLength(1);
+            expect(matchingColumns[0]?.status).toBe(application.status);
           }
-        },
-        timestamp: TEST_TIMESTAMP
-      } satisfies ActivityLogEntry))
-    );
+          expect(
+            columns.flatMap((column) => column.applications).map((item) => item.id).sort()
+          ).toEqual(applications.map((item) => item.id).sort());
 
-    assertProperty(
-      fc.property(entryArbitrary, (entry) => {
-        const item = projectActivityEntry(entry);
-        expect(item.operation).toBe(entry.toolName);
-        expect(item.toolName).toBe(entry.toolName);
-        expect(item.actorType).toBe(entry.actorType);
-        expect(item.actorId).toBe(entry.actorId);
-        expect(item.input).toEqual(entry.input);
-        expect(item.timestamp).toBe(entry.timestamp);
-        if ('error' in entry.output) {
-          expect(item.error).toEqual(entry.output.error);
-          expect(item.output).toBeNull();
-        } else {
-          expect(item.error).toBeNull();
-          expect(item.output).toEqual(entry.output);
+          const feed = projectActivityFeed(entries);
+          expect(feed).toHaveLength(entries.length);
+          entries.forEach((entry, index) => {
+            const item = feed[entries.length - index - 1];
+            const hasStructuredError = Object.prototype.hasOwnProperty.call(
+              entry.output,
+              'error'
+            );
+
+            expect(item).toEqual({
+              id: entry.id,
+              operation: entry.toolName,
+              toolName: entry.toolName,
+              actorType: entry.actorType,
+              actorId: entry.actorId,
+              input: entry.input,
+              output: hasStructuredError ? null : entry.output,
+              error: hasStructuredError ? entry.output.error : null,
+              timestamp: entry.timestamp
+            });
+          });
         }
-      })
+      )
     );
   });
 
