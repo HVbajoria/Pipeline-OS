@@ -1,40 +1,156 @@
 import { create } from 'zustand';
-import axios from 'axios';
+import type {
+  ActivityLogEntry,
+  ApplicationRecord,
+  BackgroundCheckRecord,
+  BenefitsEnrollmentRecord,
+  CandidateRecord,
+  InterviewPanel,
+  InterviewRecord,
+  JobRequisition,
+  OfferRecord,
+  OnboardingTaskRecord,
+  ScorecardRecord,
+  SharedCatalogProjection,
+  SharedStateProjectionWithCatalogs
+} from '../shared/models';
+import {
+  actorContextForRole,
+  ROLE_ACTOR_IDS,
+  type AppRole,
+  type HumanRole
+} from '../client/actorContext';
+import { PipelineError, type PipelineErrorPayload } from '../shared/errors';
 
 export interface AppState {
-  jobs: any[];
-  candidates: any[];
-  applications: any[];
-  interviews: any[];
-  scorecards: any[];
-  offers: any[];
-  onboardingTasks: any[];
+  revision: number;
+  jobs: JobRequisition[];
+  candidates: CandidateRecord[];
+  applications: ApplicationRecord[];
+  panels: InterviewPanel[];
+  interviews: InterviewRecord[];
+  scorecards: ScorecardRecord[];
+  offers: OfferRecord[];
+  onboardingTasks: OnboardingTaskRecord[];
+  backgroundChecks: BackgroundCheckRecord[];
+  benefitsEnrollments: BenefitsEnrollmentRecord[];
+  activityLog: ActivityLogEntry[];
+  catalogs: SharedCatalogProjection;
 }
 
-interface StoreState extends AppState {
-  currentRole: 'recruiter' | 'candidate' | 'hiring-manager' | 'documentation';
-  setRole: (role: 'recruiter' | 'candidate' | 'hiring-manager' | 'documentation') => void;
+export interface StoreState extends AppState {
+  currentRole: AppRole;
+  roleActors: Readonly<Record<HumanRole, string>>;
+  setRole: (role: AppRole) => void;
+  hydrate: (snapshot: SharedStateProjectionWithCatalogs) => void;
   fetchState: () => Promise<void>;
   resetState: () => Promise<void>;
+  snapshot: () => SharedStateProjectionWithCatalogs;
 }
 
-export const useStore = create<StoreState>((set) => ({
+const EMPTY_CATALOGS: SharedCatalogProjection = {
+  availabilityCalendar: [],
+  roleTemplates: [],
+  planCatalog: { medical: [], dental: [], vision: [] },
+  startDate: ''
+};
+
+const INITIAL_STATE: AppState = {
+  revision: 0,
   jobs: [],
   candidates: [],
   applications: [],
+  panels: [],
   interviews: [],
   scorecards: [],
   offers: [],
   onboardingTasks: [],
+  backgroundChecks: [],
+  benefitsEnrollments: [],
+  activityLog: [],
+  catalogs: EMPTY_CATALOGS
+};
+
+async function bodyFor(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) return undefined;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+}
+
+async function assertResponse(response: Response): Promise<unknown> {
+  const body = await bodyFor(response);
+  if (!response.ok) throw PipelineError.from(body as PipelineErrorPayload);
+  return body;
+}
+
+export const useStore = create<StoreState>((set, get) => ({
+  ...INITIAL_STATE,
+  roleActors: ROLE_ACTOR_IDS,
   currentRole: 'recruiter',
   setRole: (role) => set({ currentRole: role }),
+  hydrate: (snapshot) => {
+    set({
+      revision: snapshot.revision,
+      jobs: snapshot.jobs,
+      candidates: snapshot.candidates,
+      applications: snapshot.applications,
+      panels: snapshot.panels,
+      interviews: snapshot.interviews,
+      scorecards: snapshot.scorecards,
+      offers: snapshot.offers,
+      onboardingTasks: snapshot.onboardingTasks,
+      backgroundChecks: snapshot.backgroundChecks,
+      benefitsEnrollments: snapshot.benefitsEnrollments,
+      activityLog: snapshot.activityLog,
+      catalogs: snapshot.catalogs
+    });
+  },
   fetchState: async () => {
-    const res = await axios.get('/api/state');
-    set(res.data);
+    const response = await fetch('/api/state', {
+      method: 'GET',
+      headers: { accept: 'application/json' }
+    });
+    const body = await assertResponse(response);
+    if (!body || typeof body !== 'object') {
+      throw new Error('State endpoint returned an invalid projection');
+    }
+    get().hydrate(body as SharedStateProjectionWithCatalogs);
   },
   resetState: async () => {
-    await axios.post('/api/reset');
-    const res = await axios.get('/api/state');
-    set(res.data);
+    const resetResponse = await fetch('/api/reset', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}'
+    });
+    await assertResponse(resetResponse);
+    await get().fetchState();
+  },
+  snapshot: () => {
+    const state = get();
+    return {
+      revision: state.revision,
+      jobs: state.jobs,
+      candidates: state.candidates,
+      applications: state.applications,
+      panels: state.panels,
+      interviews: state.interviews,
+      scorecards: state.scorecards,
+      offers: state.offers,
+      onboardingTasks: state.onboardingTasks,
+      backgroundChecks: state.backgroundChecks,
+      benefitsEnrollments: state.benefitsEnrollments,
+      activityLog: state.activityLog,
+      catalogs: state.catalogs
+    };
   }
 }));
+
+export function currentHumanActor(role: AppRole = useStore.getState().currentRole) {
+  return actorContextForRole(role);
+}
+
+export { EMPTY_CATALOGS };

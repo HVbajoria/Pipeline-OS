@@ -31,6 +31,7 @@ import {
   serializeStateChangedEvent
 } from './events';
 import { resolveActorContext } from './actorContext';
+import { defaultOperationHandlers } from './operations';
 
 export interface PipelineApiOptions extends OperationServiceOptions {
   operationService?: OperationService;
@@ -274,7 +275,10 @@ export function createPipelineApi(options: PipelineApiOptions = {}): PipelineApi
     options.operationService ??
     new OperationService({
       repository: options.repository ?? new SharedStateRepository(),
-      handlers: options.handlers
+      handlers: {
+        ...defaultOperationHandlers,
+        ...(options.handlers ?? {})
+      }
     });
 
   if (options.operationService && options.handlers) {

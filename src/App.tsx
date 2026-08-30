@@ -1,973 +1,442 @@
-import React, { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, Link, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Activity, Book, Briefcase, CheckCircle, FileText, HelpCircle, User, Users, X } from 'lucide-react';
 import { useStore } from './lib/store';
-import { registerAllTools, onLogToolCall, ToolCallLog, registeredTools } from './lib/webmcp';
-import { Activity, Briefcase, Users, User, LogOut, CheckCircle, Clock, FileText, X, HelpCircle, Book } from 'lucide-react';
-import axios from 'axios';
-import { Joyride, Step } from 'react-joyride';
+import { projectActivityFeed, projectKanban } from './lib/viewModels';
+import { registerAllTools } from './lib/webmcp';
+import { createSynchronizationController } from './client/synchronization';
+import { actorContextForRole } from './client/actorContext';
+import { operationClient } from './client/operationClient';
+import { PipelineError } from './shared/errors';
+import type {
+  CandidateSearchResult,
+  GetCandidateProfileOutput,
+  GetInterviewKitOutput,
+  GetOnboardingStatusOutput,
+  GetPanelFeedbackSummaryOutput
+} from './shared/operations';
+import type { ApplicationRecord, PlanSelections } from './shared/models';
+import { OPERATION_REGISTRY } from './shared/operations';
+
+function errorMessage(error: unknown): string {
+  return PipelineError.from(error).message;
+}
+
+function json(value: unknown): string {
+  return JSON.stringify(value, null, 2);
+}
+
+function useOperationError(): [string | null, (error: unknown) => void] {
+  const [message, setMessage] = useState<string | null>(null);
+  return [message, (error) => setMessage(errorMessage(error))];
+}
 
 const AgentActivityLog = () => {
-  const [logs, setLogs] = useState<ToolCallLog[]>([]);
-
-  useEffect(() => {
-    const unsub = onLogToolCall((log) => {
-      setLogs((prev) => {
-        const existing = prev.findIndex(l => l.id === log.id);
-        if (existing > -1) {
-          const newLogs = [...prev];
-          newLogs[existing] = log;
-          return newLogs;
-        }
-        return [log, ...prev].slice(0, 50);
-      });
-    });
-    return unsub;
-  }, []);
+  const activityLog = useStore((state) => state.activityLog);
+  const entries = projectActivityFeed(activityLog).slice(0, 50);
 
   return (
-    <div className="w-80 bg-gray-50 border-l border-gray-200 h-full overflow-y-auto flex flex-col tour-agent-log">
+    <aside className="w-96 bg-gray-50 border-l border-gray-200 h-full overflow-y-auto flex flex-col tour-agent-log">
       <div className="p-4 border-b border-gray-200 bg-white sticky top-0 font-medium flex items-center gap-2">
-        <Activity className="w-4 h-4 text-blue-600" /> Agent Activity Log
+        <Activity className="w-4 h-4 text-blue-600" /> Live Activity Feed
       </div>
       <div className="p-4 flex-1 space-y-3">
-        {logs.map(log => (
-          <div key={log.id} className="text-sm bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
-            <div className="flex justify-between items-center mb-1">
-              <span className="font-medium text-gray-800">{log.name}</span>
-              <span className={`text-xs px-2 py-0.5 rounded-full ${log.status === 'success' ? 'bg-green-100 text-green-700' : log.status === 'error' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                {log.status}
+        {entries.map((entry) => (
+          <article key={entry.id} className="text-sm bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+            <div className="flex justify-between items-start gap-2 mb-1">
+              <span className="font-medium text-gray-800 break-all">{entry.operation}</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full ${entry.error ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                {entry.error ? entry.error.code : 'success'}
               </span>
             </div>
-            <div className="text-xs text-gray-500 font-mono bg-gray-50 p-2 rounded truncate" title={JSON.stringify(log.params)}>
-              {JSON.stringify(log.params)}
+            <div className="text-xs text-gray-500 mb-2">
+              {entry.actorType} · {entry.actorId} · {entry.timestamp}
             </div>
-          </div>
+            <div className="text-xs font-mono bg-gray-50 p-2 rounded overflow-x-auto">
+              <div><strong>input</strong> {json(entry.input)}</div>
+              <div className="mt-1"><strong>{entry.error ? 'error' : 'output'}</strong> {json(entry.error ?? entry.output)}</div>
+            </div>
+          </article>
         ))}
-        {logs.length === 0 && (
-          <div className="text-sm text-gray-400 text-center py-8">
-            No agent activity yet. Start calling tools!
-          </div>
+        {entries.length === 0 && (
+          <div className="text-sm text-gray-400 text-center py-8">No activity yet.</div>
         )}
       </div>
-    </div>
+    </aside>
   );
 };
 
-const Navigation = ({ onStartTour }: { onStartTour: () => void }) => {
+const Navigation = () => {
   const { currentRole, setRole, resetState } = useStore();
-  
+  const [resetError, setResetError] = useState<string | null>(null);
+
+  const reset = async () => {
+    try {
+      setResetError(null);
+      await resetState();
+    } catch (error) {
+      setResetError(errorMessage(error));
+    }
+  };
+
+  const roles = [
+    ['recruiter', Users, 'Recruiter'],
+    ['candidate', User, 'Candidate'],
+    ['hiring-manager', FileText, 'Hiring Manager'],
+    ['documentation', Book, 'Documentation']
+  ] as const;
+
   return (
     <nav className="bg-slate-900 text-white w-64 flex flex-col h-full">
       <div className="p-4 flex items-center gap-2 border-b border-slate-800">
         <Briefcase className="w-6 h-6 text-blue-400" />
         <span className="font-bold text-lg tracking-tight">PipelineOS</span>
       </div>
-      
       <div className="flex-1 py-6 px-3 space-y-1 tour-role-switcher">
         <div className="px-3 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">View As</div>
-        <button
-          onClick={() => setRole('recruiter')}
-          className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${currentRole === 'recruiter' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
-        >
-          <Users className="w-4 h-4" /> Recruiter
-        </button>
-        <button
-          onClick={() => setRole('candidate')}
-          className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${currentRole === 'candidate' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
-        >
-          <User className="w-4 h-4" /> Candidate
-        </button>
-        <button
-          onClick={() => setRole('hiring-manager')}
-          className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${currentRole === 'hiring-manager' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
-        >
-          <FileText className="w-4 h-4" /> Hiring Manager
-        </button>
-        <button
-          onClick={() => setRole('documentation')}
-          className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${currentRole === 'documentation' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
-        >
-          <Book className="w-4 h-4" /> Documentation
-        </button>
+        {roles.map(([role, Icon, label]) => (
+          <button
+            key={role}
+            onClick={() => setRole(role)}
+            className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${currentRole === role ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+          >
+            <Icon className="w-4 h-4" /> {label}
+          </button>
+        ))}
       </div>
-
       <div className="p-4 border-t border-slate-800 space-y-2">
-        <button onClick={onStartTour} className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
+        <button className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800">
           <HelpCircle className="w-4 h-4" /> Start Tour
         </button>
-        <button onClick={resetState} className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
+        <button onClick={reset} className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800">
           Reset DB (Demo)
         </button>
+        {resetError && <p className="text-xs text-red-300">{resetError}</p>}
       </div>
     </nav>
   );
-}
-
-// --- Views ---
+};
 
 const DocumentationView = () => {
+  const descriptors = Object.values(requirementsRegistry());
   return (
     <div className="p-8 max-w-5xl mx-auto space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-gray-900 mb-2">WebMCP Tools Documentation</h1>
-        <p className="text-gray-500">Below are the registered tools available to the agent along with their schemas.</p>
+        <p className="text-gray-500">The documentation is rendered from the same 19 descriptors registered with WebMCP.</p>
       </div>
-      
       <div className="space-y-6">
-        {registeredTools.map(tool => (
-          <div key={tool.name} className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-            <h2 className="text-lg font-bold text-gray-900 mb-2 font-mono text-blue-600">{tool.name}</h2>
-            <p className="text-gray-700 mb-4">{tool.description}</p>
-            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 overflow-x-auto">
-              <pre className="text-sm text-slate-800 font-mono whitespace-pre-wrap">
-                {JSON.stringify(tool.schema, null, 2)}
-              </pre>
+        {descriptors.map((tool) => (
+          <article key={tool.name} className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <h2 className="text-lg font-bold text-gray-900 font-mono text-blue-600">{tool.name}</h2>
+              <span className="text-xs rounded-full px-2 py-1 bg-slate-100 text-slate-600">{tool.readOnly ? 'read-only' : 'mutation'}</span>
             </div>
-          </div>
+            <p className="text-gray-700 mb-4">{tool.description}</p>
+            <pre className="bg-slate-50 p-4 rounded-lg border border-slate-200 overflow-x-auto text-sm text-slate-800 font-mono whitespace-pre-wrap">
+              {json({ inputSchema: tool.inputSchema, annotations: tool.annotations })}
+            </pre>
+          </article>
         ))}
-        {registeredTools.length === 0 && (
-          <div className="text-gray-500 text-center py-12 bg-white rounded-xl border border-gray-200">
-            No tools registered.
-          </div>
-        )}
       </div>
     </div>
   );
 };
 
+function requirementsRegistry() {
+  // A local function keeps the documentation view declarative while the
+  // registry itself remains imported from the shared contract module below.
+  return OPERATION_REGISTRY;
+}
+
 const RecruiterView = () => {
-  const { jobs, applications, candidates, offers, onboardingTasks, interviews, fetchState } = useStore();
+  const { jobs, applications, candidates, interviews, offers, onboardingTasks, backgroundChecks, panels, catalogs } = useStore();
+  const [searchResults, setSearchResults] = useState<CandidateSearchResult[]>([]);
+  const [profile, setProfile] = useState<GetCandidateProfileOutput | null>(null);
+  const [feedbackSummary, setFeedbackSummary] = useState<GetPanelFeedbackSummaryOutput | null>(null);
+  const [availability, setAvailability] = useState<string[]>([]);
   const [schedulingAppId, setSchedulingAppId] = useState<string | null>(null);
-  const [selectedSlot, setSelectedSlot] = useState<string>('');
+  const [compAmount, setCompAmount] = useState('175000');
+  const [onboardingStatus, setOnboardingStatus] = useState<Record<string, GetOnboardingStatusOutput>>({});
+  const [error, setError] = useOperationError();
+  const actor = actorContextForRole('recruiter');
 
-  const checkOverlap = (slot: string) => {
-    return interviews.some((i: any) => i.status === 'scheduled' && i.slot === slot);
-  };
-
-
-  const handleCreateReq = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const fd = new FormData(e.target as HTMLFormElement);
-    const reqs = fd.get('requirements')?.toString().split(',').map(s => s.trim()) || [];
-    await axios.post('/api/jobs', {
-      title: fd.get('title'),
-      department: fd.get('department'),
-      requirements: reqs,
-      compBand: {
-        min: parseInt(fd.get('min') as string),
-        max: parseInt(fd.get('max') as string),
-        currency: fd.get('currency')
-      }
-    });
-    fetchState();
-    (e.target as HTMLFormElement).reset();
-  };
-
-  const [searchResults, setSearchResults] = useState<any[]>([]);
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const fd = new FormData(e.target as HTMLFormElement);
-    const query = fd.get('query') as string;
-    const skills = fd.get('skills')?.toString().split(',').map(s => s.trim()).filter(Boolean) || [];
-    const experienceLevel = fd.get('experienceLevel') as string;
-    
-    const res = await axios.post('/api/candidates/search', { query, skills, experienceLevel: experienceLevel || undefined });
-    setSearchResults(res.data.results);
-  };
-
-
-  const handleScreen = async (appId: string) => {
-    await axios.post(`/api/applications/${appId}/screen`);
-    fetchState();
-  };
-
-  const handleProposeSlots = async (appId: string) => {
-    await axios.post('/api/interviews/propose', { applicationId: appId });
-    fetchState();
-  };
-
-
-  const handleOffer = async (applicationId: string) => {
-    await axios.post(`/api/offers`, { applicationId, compAmount: 175000 });
-    fetchState();
-  };
-
-  const handleBackgroundCheck = async (offerId: string) => {
-    await axios.post(`/api/offers/${offerId}/background-check`);
-    fetchState();
-  };
-
-
-  const handleGenerateOnboarding = async (offerId: string) => {
-    await axios.post(`/api/offers/${offerId}/onboarding`);
-    fetchState();
-  };
-
-
-  const [viewingCandidate, setViewingCandidate] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'profile' | 'interviews'>('profile');
-  const [feedbackSummary, setFeedbackSummary] = useState<any>(null);
-
-  const handleViewProfile = async (candidateId: string) => {
+  const run = async (operation: () => Promise<unknown>) => {
     try {
-      const res = await axios.get(`/api/candidates/${candidateId}`);
-      setViewingCandidate(res.data);
-      setActiveTab('profile');
-      
-      // Attempt to load feedback for the first application if exists
-      if (res.data.applicationHistory?.length > 0) {
-        const appId = res.data.applicationHistory[0].id;
-        const fbRes = await axios.get(`/api/applications/${appId}/feedback-summary`);
-        setFeedbackSummary(fbRes.data);
-      }
-    } catch (e) {
-      console.error(e);
+      setError(null);
+      return await operation();
+    } catch (caught) {
+      setError(caught);
+      return undefined;
     }
   };
 
+  const handleCreateReq = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const requirements = String(data.get('requirements') ?? '').split(',').map((value) => value.trim()).filter(Boolean);
+    const result = await run(() => operationClient.invoke('create_job_requisition', {
+      title: String(data.get('title') ?? ''),
+      department: String(data.get('department') ?? ''),
+      requirements,
+      compBand: {
+        min: Number(data.get('min')),
+        max: Number(data.get('max')),
+        currency: String(data.get('currency') ?? '')
+      }
+    }, actor));
+    if (result) form.reset();
+  };
 
+  const handleSearch = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const rawLevel = String(data.get('experienceLevel') ?? '');
+    const experienceLevel = rawLevel === 'junior' || rawLevel === 'mid' || rawLevel === 'senior' ? rawLevel : undefined;
+    const result = await run(() => operationClient.invoke('search_candidates', {
+      query: String(data.get('query') ?? '') || undefined,
+      skills: String(data.get('skills') ?? '').split(',').map((value) => value.trim()).filter(Boolean),
+      experienceLevel
+    }, actor));
+    if (result) setSearchResults((result as { results: CandidateSearchResult[] }).results);
+  };
+
+  const handleProfile = async (candidateId: string) => {
+    const result = await run(() => operationClient.invoke('get_candidate_profile', { candidateId }, actor));
+    if (!result) return;
+    const candidateProfile = result as GetCandidateProfileOutput;
+    setProfile(candidateProfile);
+    const firstApplication = candidateProfile.applicationHistory[0];
+    if (firstApplication) {
+      const summary = await run(() => operationClient.invoke('get_panel_feedback_summary', { applicationId: firstApplication.id }, actor));
+      if (summary) setFeedbackSummary(summary as GetPanelFeedbackSummaryOutput);
+    }
+  };
+
+  const handleScreen = (applicationId: string) => run(() => operationClient.invoke('screen_candidate', { applicationId }, actor));
+
+  const handlePropose = async (application: ApplicationRecord) => {
+    const panel = panels.find((candidatePanel) => candidatePanel.jobId === application.jobId);
+    if (!panel) {
+      setError(new Error('No interview panel is configured for this application'));
+      return;
+    }
+    const slots = catalogs.availabilityCalendar.flatMap((entry) => entry.freeSlots).sort();
+    const start = slots[0] ?? '2026-09-01T00:00:00Z';
+    const last = slots.at(-1) ?? '2026-09-10T00:00:00Z';
+    const end = new Date(new Date(last).getTime() + 60 * 60 * 1000).toISOString();
+    const common = await run(() => operationClient.invoke('check_interviewer_availability', {
+      panelId: panel.id,
+      dateRange: { start, end }
+    }, actor));
+    if (common) setAvailability((common as { commonFreeSlots: string[] }).commonFreeSlots);
+    const proposed = await run(() => operationClient.invoke('propose_interview_slots', { applicationId: application.id }, actor));
+    if (proposed) setSchedulingAppId(application.id);
+  };
+
+  const handleBook = (applicationId: string, slot: string) => run(() => operationClient.invoke('book_interview', { applicationId, slot }, actor));
+  const handleOffer = (applicationId: string) => run(() => operationClient.invoke('generate_offer', { applicationId, compAmount: Number(compAmount) }, actor));
+  const handleSendOffer = (offerId: string) => run(() => operationClient.invoke('send_offer', { offerId }, actor));
+  const handleBackgroundCheck = (offerId: string) => run(() => operationClient.invoke('initiate_background_check', { offerId }, actor));
+  const handleChecklist = (offerId: string) => run(() => operationClient.invoke('generate_onboarding_checklist', { offerId }, actor));
+  const handleOnboardingStatus = async (offerId: string) => {
+    const result = await run(() => operationClient.invoke('get_onboarding_status', { offerId }, actor));
+    if (result) setOnboardingStatus((previous) => ({ ...previous, [offerId]: result as GetOnboardingStatusOutput }));
+  };
+
+  const columns = useMemo(() => projectKanban(applications), [applications]);
 
   return (
-    <div className="p-8 max-w-5xl mx-auto space-y-8">
-
-
+    <div className="p-8 max-w-7xl mx-auto space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">Recruiter Dashboard</h1>
+        <h1 className="text-2xl font-bold text-gray-900 mb-2">Recruiter Dashboard</h1>
+        <p className="text-gray-500">All cards, offers, interviews, and activity are projections of persisted Shared_State.</p>
+      </div>
+      {error && <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>}
 
-        {viewingCandidate && (
-
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden shadow-2xl">
-              <div className="px-6 py-4 border-b flex justify-between items-center bg-gray-50">
-                <h2 className="text-xl font-bold text-gray-900">Candidate Profile: {viewingCandidate.name}</h2>
-                <button onClick={() => setViewingCandidate(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
-              </div>
-              <div className="flex border-b">
-                <button onClick={() => setActiveTab('profile')} className={`px-6 py-3 font-medium text-sm ${activeTab === 'profile' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}>Profile Details</button>
-                <button onClick={() => setActiveTab('interviews')} className={`px-6 py-3 font-medium text-sm ${activeTab === 'interviews' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}>Interview Summary</button>
-              </div>
-              
-              {activeTab === 'profile' ? (
-                <div className="p-6 overflow-y-auto space-y-4 flex-1">
-                  <div>
-                    <div className="text-sm font-semibold text-gray-500 uppercase tracking-wider">Email</div>
-                    <div>{viewingCandidate.email}</div>
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold text-gray-500 uppercase tracking-wider">Skills</div>
-                    <div className="flex gap-2 flex-wrap mt-1">
-                      {viewingCandidate.skills.map((s: string) => <span key={s} className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">{s}</span>)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold text-gray-500 uppercase tracking-wider">Resume</div>
-                    <pre className="whitespace-pre-wrap text-sm bg-gray-50 p-3 rounded border border-gray-200 mt-1">{viewingCandidate.resumeText}</pre>
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Application History</div>
-                    {viewingCandidate.applicationHistory?.length > 0 ? (
-                      <ul className="space-y-2">
-                        {viewingCandidate.applicationHistory.map((h: any) => (
-                          <li key={h.id} className="text-sm border p-2 rounded flex justify-between">
-                            <span>Job ID: {h.jobId}</span>
-                            <span className="capitalize font-semibold">{h.status}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : <div className="text-sm text-gray-500">No applications on file.</div>}
-                  </div>
-                </div>
-              ) : (
-                <div className="p-6 overflow-y-auto space-y-4 flex-1">
-                  {!feedbackSummary || feedbackSummary.scorecards?.length === 0 ? (
-                    <div className="text-gray-500 text-center py-8">No interview feedback available yet.</div>
-                  ) : (
-                    <div>
-                      <div className="grid grid-cols-2 gap-4 mb-6">
-                        <div className="bg-gray-50 p-4 rounded-xl border">
-                          <h3 className="font-semibold text-gray-700 text-sm mb-2">Average Competency Scores</h3>
-                          <ul className="space-y-1">
-                            {Object.entries(feedbackSummary.averageScores).map(([comp, score]) => (
-                              <li key={comp} className="flex justify-between text-sm">
-                                <span className="capitalize">{comp}</span>
-                                <span className="font-bold">{(score as number).toFixed(1)} / 5</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                        <div className="bg-gray-50 p-4 rounded-xl border">
-                          <h3 className="font-semibold text-gray-700 text-sm mb-2">Recommendation Tally</h3>
-                          <ul className="space-y-1">
-                            {Object.entries(feedbackSummary.recommendationTally).map(([rec, count]) => (
-                              <li key={rec} className="flex justify-between text-sm">
-                                <span className="capitalize">{rec.replace('_', ' ')}</span>
-                                <span className="font-bold">{count as number}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      </div>
-                      
-                      <h3 className="font-semibold text-gray-700 text-sm mb-2 border-b pb-2">Individual Scorecards</h3>
-                      <div className="space-y-3">
-                        {feedbackSummary.scorecards.map((s: any) => (
-                          <div key={s.id} className="border p-4 rounded-lg bg-white shadow-sm">
-                            <div className="flex justify-between items-center mb-2">
-                              <span className="font-medium text-sm text-gray-800">Interviewer: {s.interviewer}</span>
-                              <span className={`px-2 py-1 rounded text-xs font-bold ${s.recommendation === 'strong_hire' ? 'bg-green-100 text-green-800' : s.recommendation === 'hire' ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800'}`}>{s.recommendation.toUpperCase().replace('_', ' ')}</span>
-                            </div>
-                            <div className="text-xs text-gray-500 space-y-1 mt-2">
-                                {Object.entries(s.competencyScores).map(([c, sc]) => (
-                                  <div key={c}><span className="capitalize font-medium">{c}:</span> {sc as number}</div>
-                                ))}
-                            </div>
-                            {s.comments && (
-                              <div className="mt-3 text-sm text-gray-700 bg-gray-50 p-2 rounded border border-gray-100">
-                                {s.comments}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
+      {profile && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto shadow-2xl p-6">
+            <div className="flex justify-between items-start mb-5">
+              <div><h2 className="text-xl font-bold">{profile.name}</h2><p className="text-sm text-gray-500">{profile.email}</p></div>
+              <button onClick={() => setProfile(null)} aria-label="Close profile"><X className="w-5 h-5" /></button>
             </div>
-          </div>
-
-        )}
-
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-          <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-            <h2 className="text-lg font-semibold mb-4 border-b pb-2">New Requisition</h2>
-            <form onSubmit={handleCreateReq} className="space-y-3">
-              <div>
-                <input name="title" placeholder="Job Title" required className="w-full border rounded p-2 text-sm" />
-              </div>
-              <div>
-                <input name="department" placeholder="Department" required className="w-full border rounded p-2 text-sm" />
-              </div>
-              <div>
-                <input name="requirements" placeholder="Requirements (comma separated)" required className="w-full border rounded p-2 text-sm" />
-              </div>
-              <div className="flex gap-2">
-                <input name="min" type="number" placeholder="Min Salary" required className="w-full border rounded p-2 text-sm" />
-                <input name="max" type="number" placeholder="Max Salary" required className="w-full border rounded p-2 text-sm" />
-                <input name="currency" placeholder="Currency (e.g. $)" defaultValue="$" required className="w-16 border rounded p-2 text-sm" />
-              </div>
-              <button type="submit" className="w-full bg-blue-600 text-white rounded p-2 text-sm font-medium hover:bg-blue-700">Create Requisition</button>
-            </form>
-          </div>
-
-          <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-            <h2 className="text-lg font-semibold mb-4 border-b pb-2">Source Candidates</h2>
-            <form onSubmit={handleSearch} className="space-y-3">
-              <div>
-                <input name="query" placeholder="Search Query (e.g. 'kubernetes backend')" className="w-full border rounded p-2 text-sm" />
-              </div>
-              <div>
-                <input name="skills" placeholder="Skills (comma separated)" className="w-full border rounded p-2 text-sm" />
-              </div>
-              <div>
-                <select name="experienceLevel" className="w-full border rounded p-2 text-sm bg-white">
-                  <option value="">Any Experience Level</option>
-                  <option value="junior">Junior</option>
-                  <option value="mid">Mid</option>
-                  <option value="senior">Senior</option>
-                </select>
-              </div>
-              <button type="submit" className="w-full bg-indigo-600 text-white rounded p-2 text-sm font-medium hover:bg-indigo-700">Search</button>
-            </form>
-            {searchResults.length > 0 && (
-              <div className="mt-4 space-y-3 max-h-60 overflow-y-auto border-t pt-4">
-                {searchResults.map(res => (
-                  <div key={res.candidateId} className="bg-white rounded-lg border border-gray-200 p-3 shadow-sm hover:border-indigo-300 transition-colors">
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="font-semibold text-gray-900">{res.name}</div>
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-indigo-100 text-indigo-800">
-                        Score: {res.matchScore}
-                      </span>
-                    </div>
-                    <div className="text-xs text-gray-700 bg-indigo-50/50 p-2 rounded border border-indigo-100">
-                      <span className="font-semibold text-indigo-900 block mb-0.5">Rationale:</span>
-                      {res.rationale}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            <p className="text-sm mb-4">Skills: {profile.skills.join(', ')}</p>
+            <pre className="text-sm bg-gray-50 rounded p-3 whitespace-pre-wrap">{profile.resumeText}</pre>
+            <h3 className="font-semibold mt-5 mb-2">Application history</h3>
+            <ul className="space-y-2">{profile.applicationHistory.map((application) => <li key={application.id} className="border rounded p-2 text-sm flex justify-between"><span>{application.jobId}</span><span>{application.status}</span></li>)}</ul>
+            {feedbackSummary && <div className="mt-5 border-t pt-4"><h3 className="font-semibold mb-2">Panel feedback</h3><pre className="text-xs bg-gray-50 rounded p-3 overflow-auto">{json(feedbackSummary)}</pre></div>}
           </div>
         </div>
+      )}
 
-        <h2 className="text-lg font-semibold mb-4 border-b pb-2">Active Requisitions</h2>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <form onSubmit={handleCreateReq} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-3">
+          <h2 className="text-lg font-semibold border-b pb-2">New requisition</h2>
+          <input name="title" placeholder="Job title" required className="w-full border rounded p-2 text-sm" />
+          <input name="department" placeholder="Department" required className="w-full border rounded p-2 text-sm" />
+          <input name="requirements" placeholder="Requirements (comma separated)" required className="w-full border rounded p-2 text-sm" />
+          <div className="flex gap-2"><input name="min" type="number" placeholder="Min" required className="w-full border rounded p-2 text-sm" /><input name="max" type="number" placeholder="Max" required className="w-full border rounded p-2 text-sm" /><input name="currency" defaultValue="USD" required className="w-24 border rounded p-2 text-sm" /></div>
+          <button className="w-full bg-blue-600 text-white rounded p-2 text-sm font-medium">Create requisition</button>
+        </form>
+        <form onSubmit={handleSearch} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-3">
+          <h2 className="text-lg font-semibold border-b pb-2">Source candidates</h2>
+          <input name="query" placeholder="Query" className="w-full border rounded p-2 text-sm" />
+          <input name="skills" placeholder="Skills (comma separated)" className="w-full border rounded p-2 text-sm" />
+          <select name="experienceLevel" className="w-full border rounded p-2 text-sm bg-white"><option value="">Any experience</option><option value="junior">Junior</option><option value="mid">Mid</option><option value="senior">Senior</option></select>
+          <button className="w-full bg-indigo-600 text-white rounded p-2 text-sm font-medium">Search</button>
+          <div className="space-y-2">{searchResults.map((result) => <div key={result.candidateId} className="border rounded p-3 text-sm"><div className="flex justify-between"><strong>{result.name}</strong><span>{result.matchScore}</span></div><p className="text-gray-600">{result.rationale}</p><button type="button" onClick={() => handleProfile(result.candidateId)} className="text-blue-600 text-xs">Open profile</button></div>)}</div>
+        </form>
+      </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {jobs.map(job => (
-            <div key={job.id} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-              <div className="flex justify-between items-start mb-2">
-                <h3 className="font-semibold text-gray-900">{job.title}</h3>
-                <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">Open</span>
-              </div>
-              <p className="text-sm text-gray-500 mb-4">{job.department} &middot; {job.compBand}</p>
-              <div className="text-sm text-gray-600">
-                {applications.filter(a => a.jobId === job.id).length} Active Applications
+      <section>
+        <h2 className="text-lg font-semibold mb-4">Requisitions</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{jobs.map((job) => <div key={job.id} className="bg-white p-5 rounded-xl border border-gray-200"><div className="flex justify-between"><h3 className="font-semibold">{job.title}</h3><span className="text-xs text-green-700">{job.status}</span></div><p className="text-sm text-gray-500">{job.department} · {job.compBand.min.toLocaleString()}–{job.compBand.max.toLocaleString()} {job.compBand.currency}</p><p className="text-sm text-gray-600 mt-2">{applications.filter((application) => application.jobId === job.id).length} applications</p></div>)}</div>
+      </section>
+
+      <section>
+        <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-semibold">Pipeline Kanban</h2><label className="text-sm">Offer amount <input value={compAmount} onChange={(event) => setCompAmount(event.target.value)} type="number" className="w-28 border rounded p-1 ml-1" /></label></div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          {columns.map((column) => (
+            <div key={column.status} data-status={column.status} className="bg-gray-50 border border-gray-200 rounded-xl p-3 min-h-36">
+              <h3 className="capitalize font-semibold text-sm mb-3">{column.label} <span className="text-gray-400">({column.applications.length})</span></h3>
+              <div className="space-y-3">
+                {column.applications.map((application) => {
+                  const candidate = candidates.find((item) => item.id === application.candidateId);
+                  const offer = offers.find((item) => item.applicationId === application.id);
+                  const appInterviews = interviews.filter((item) => item.applicationId === application.id);
+                  const acceptedOffer = offer?.status === 'accepted' ? offer : undefined;
+                  const tasks = acceptedOffer ? onboardingTasks.filter((task) => task.offerId === acceptedOffer.id) : [];
+                  const background = acceptedOffer ? backgroundChecks.find((check) => check.offerId === acceptedOffer.id) : undefined;
+                  return (
+                    <article key={application.id} className="bg-white rounded-lg border p-3 shadow-sm text-sm">
+                      <div className="flex justify-between gap-2"><strong>{candidate?.name ?? application.candidateId}</strong><span className="text-xs text-gray-500">{application.status}</span></div>
+                      {application.screeningScore !== null && <p className="text-xs text-gray-600 mt-1">Screening: {application.screeningScore}%</p>}
+                      {offer && <p className="text-xs mt-1">Offer: {offer.status}{offer.compensationWarning ? ` · ${offer.compensationWarning}` : ''}</p>}
+                      {appInterviews.length > 0 && <p className="text-xs mt-1">Interviews: {appInterviews.map((interview) => `${interview.status} ${new Date(interview.slot).toLocaleString()}`).join(' · ')}</p>}
+                      {acceptedOffer && <p className="text-xs mt-1">BG: {background?.status ?? 'not started'} · Tasks: {tasks.length}</p>}
+                      <div className="flex flex-wrap gap-1 mt-3">
+                        {application.status === 'applied' && <button onClick={() => void handleScreen(application.id)} className="text-blue-700 bg-blue-50 px-2 py-1 rounded text-xs">Screen</button>}
+                        {application.status === 'screened' && <button onClick={() => void handlePropose(application)} className="text-indigo-700 bg-indigo-50 px-2 py-1 rounded text-xs">Check & propose</button>}
+                        {application.status === 'interviewing' && <button onClick={() => void handleOffer(application.id)} className="text-green-700 bg-green-50 px-2 py-1 rounded text-xs">Generate offer</button>}
+                        {offer?.status === 'draft' && <button onClick={() => void handleSendOffer(offer.id)} className="text-purple-700 bg-purple-50 px-2 py-1 rounded text-xs">Send offer</button>}
+                        {acceptedOffer && !background && <button onClick={() => void handleBackgroundCheck(acceptedOffer.id)} className="text-purple-700 bg-purple-50 px-2 py-1 rounded text-xs">Background check</button>}
+                        {acceptedOffer && tasks.length === 0 && <button onClick={() => void handleChecklist(acceptedOffer.id)} className="text-orange-700 bg-orange-50 px-2 py-1 rounded text-xs">Checklist</button>}
+                        {acceptedOffer && <button onClick={() => void handleOnboardingStatus(acceptedOffer.id)} className="text-orange-700 bg-orange-50 px-2 py-1 rounded text-xs">Status</button>}
+                        <button onClick={() => candidate && void handleProfile(candidate.id)} className="text-gray-700 bg-gray-100 px-2 py-1 rounded text-xs">Profile</button>
+                      </div>
+                      {schedulingAppId === application.id && <div className="mt-3 border-t pt-2"><p className="text-xs text-gray-500 mb-1">Common slots: {availability.length}</p><div className="flex flex-wrap gap-1">{appInterviews.filter((interview) => interview.status === 'proposed').map((interview) => <button key={interview.id} onClick={() => void handleBook(application.id, interview.slot)} className="text-xs border border-indigo-300 text-indigo-700 rounded px-2 py-1">{new Date(interview.slot).toLocaleString()}</button>)}</div></div>}
+                      {acceptedOffer && onboardingStatus[acceptedOffer.id] && <pre className="mt-2 text-[10px] bg-gray-50 p-2 rounded overflow-auto">{json(onboardingStatus[acceptedOffer.id])}</pre>}
+                    </article>
+                  );
+                })}
+                {column.applications.length === 0 && <p className="text-xs text-gray-400">No applications</p>}
               </div>
             </div>
           ))}
         </div>
-      </div>
-
-      <div>
-        <h2 className="text-lg font-semibold mb-4 border-b pb-2">Pipeline (All Applications)</h2>
-        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Candidate</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stage</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {applications.map(app => {
-                const cand = candidates.find(c => c.id === app.candidateId);
-                const offer = offers.find(o => o.applicationId === app.id);
-                return (
-                  <tr key={app.id}>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="font-medium text-gray-900">{cand?.name}</div>
-                      <div className="text-sm text-gray-500">{cand?.email}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="px-2.5 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800 capitalize">
-                        {app.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {app.screeningScore !== undefined ? `${app.screeningScore}%` : '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-
-
-                      {app.status === 'applied' && (
-                        <button onClick={() => handleScreen(app.id)} className="text-blue-600 hover:text-blue-900 bg-blue-50 px-3 py-1 rounded-md">Screen</button>
-                      )}
-                      {app.status === 'screened' && (
-                        <button onClick={() => handleProposeSlots(app.id)} className="text-indigo-600 hover:text-indigo-900 bg-indigo-50 px-3 py-1 rounded-md">Propose Slots</button>
-                      )}
-                      {app.status === 'interviewing' && (
-                        <button onClick={() => handleOffer(app.id)} className="text-green-600 hover:text-green-900 bg-green-50 px-3 py-1 rounded-md">Make Offer</button>
-                      )}
-                      <button onClick={() => handleViewProfile(cand!.id)} className="text-gray-600 hover:text-gray-900 bg-gray-50 px-3 py-1 rounded-md">Profile</button>
-
-
-                      {app.status === 'screened' && schedulingAppId !== app.id && (
-                        <button 
-                          onClick={() => {
-                            setSchedulingAppId(app.id);
-                            const tomorrow = new Date();
-                            tomorrow.setDate(tomorrow.getDate() + 1);
-                            setSelectedSlot(tomorrow.toISOString().split('T')[0] + " 10:00");
-                          }} 
-                          className="text-indigo-600 hover:text-indigo-900 bg-indigo-50 px-3 py-1 rounded-md" 
-                          title="Schedule interview"
-                        >
-                          Schedule...
-                        </button>
-                      )}
-                      {app.status === 'screened' && schedulingAppId === app.id && (
-                        <div className="flex flex-col gap-2">
-                          <input 
-                            type="datetime-local" 
-                            value={selectedSlot}
-                            onChange={(e) => setSelectedSlot(e.target.value)}
-                            className={`text-xs border rounded p-1 w-max ${checkOverlap(selectedSlot) ? 'border-red-500 bg-red-50' : 'border-gray-300'}`}
-                          />
-                          {checkOverlap(selectedSlot) && (
-                            <span className="text-xs text-red-600 flex items-center gap-1">
-                              ⚠️ Time slot overlaps with existing interview
-                            </span>
-                          )}
-                          <div className="flex gap-2">
-                            <button 
-                              onClick={async () => {
-                                await axios.post('/api/interviews/schedule', { applicationId: app.id, slot: selectedSlot });
-                                setSchedulingAppId(null);
-                                fetchState();
-                              }}
-                              className="text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1 rounded-md text-xs"
-                            >Confirm</button>
-                            <button 
-                              onClick={() => setSchedulingAppId(null)}
-                              className="text-gray-600 bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-md text-xs"
-                            >Cancel</button>
-                          </div>
-                        </div>
-                      )}
-                      {app.status === 'interviewing' && (
-                        <button onClick={() => handleOffer(app.id)} className="text-green-600 hover:text-green-900 bg-green-50 px-3 py-1 rounded-md">Make Offer</button>
-                      )}
-                      {app.status === 'offered' && (
-                        <span className="text-gray-500 italic">Offer Drafted</span>
-                      )}
-                      {app.status === 'hired' && (
-                        <div className="flex flex-col gap-2">
-                          <span className="text-green-600 font-bold">Hired!</span>
-                          
-                          {offer && offer.status === 'accepted' && (
-                            <div className="flex flex-col gap-1">
-                              {!offer.backgroundCheckStatus ? (
-                                <button onClick={() => handleBackgroundCheck(offer.id)} className="text-purple-600 hover:text-purple-900 bg-purple-50 px-3 py-1 rounded-md text-xs w-max">Initiate BG Check</button>
-                              ) : (
-                                <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-md w-max">BG: {offer.backgroundCheckStatus}</span>
-                              )}
-                              
-                              {onboardingTasks.filter((t: any) => t.offerId === offer.id).length === 0 ? (
-                                <button onClick={() => handleGenerateOnboarding(offer.id)} className="text-orange-600 hover:text-orange-900 bg-orange-50 px-3 py-1 rounded-md text-xs w-max">Generate Onboarding</button>
-                              ) : (
-                                <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-md w-max">Tasks Generated ({onboardingTasks.filter((t: any) => t.offerId === offer.id).length})</span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-              {applications.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-gray-500 text-sm">No applications yet.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      </section>
     </div>
   );
 };
 
 const CandidateView = () => {
-  const { jobs, candidates, applications, offers, interviews, fetchState } = useStore();
-  const candidateId = "cand-1"; // Hardcoded for demo
-  const cand = candidates.find(c => c.id === candidateId);
-  const myApps = applications.filter(a => a.candidateId === candidateId);
-  const myOffers = offers.filter(o => myApps.some(a => a.id === o.applicationId));
+  const { jobs, candidates, applications, interviews, offers, backgroundChecks, benefitsEnrollments, onboardingTasks, catalogs } = useStore();
+  const candidateId = 'cand-1';
+  const candidate = candidates.find((item) => item.id === candidateId);
+  const myApplications = applications.filter((application) => application.candidateId === candidateId);
+  const myOffers = offers.filter((offer) => myApplications.some((application) => application.id === offer.applicationId));
+  const [faqAnswers, setFaqAnswers] = useState<Record<string, { answer: string; answeredFromData: boolean }>>({});
+  const [counterAmounts, setCounterAmounts] = useState<Record<string, string>>({});
+  const [benefitSelections, setBenefitSelections] = useState<Record<string, PlanSelections>>({});
+  const [statusByOffer, setStatusByOffer] = useState<Record<string, GetOnboardingStatusOutput>>({});
+  const [error, setError] = useOperationError();
+  const actor = actorContextForRole('candidate');
 
-
-  const handleApply = async (jobId: string) => {
-    await axios.post('/api/applications', { candidateId, jobId, resumeText: cand?.resumeText || "My Resume" });
-    fetchState();
+  const run = async (operation: () => Promise<unknown>) => {
+    try { setError(null); return await operation(); } catch (caught) { setError(caught); return undefined; }
   };
-
-  const [faqAnswers, setFaqAnswers] = useState<Record<string, { answer: string, fromData: boolean }>>({});
-  const handleAskFaq = async (e: React.FormEvent, jobId: string) => {
-    e.preventDefault();
-    const form = e.target as HTMLFormElement;
-    const question = (form.elements.namedItem('question') as HTMLInputElement).value;
-    try {
-      const res = await axios.post(`/api/jobs/${jobId}/faq`, { question });
-      setFaqAnswers(prev => ({ ...prev, [jobId]: { answer: res.data.answer, fromData: res.data.answeredFromData } }));
-    } catch (e) {
-      setFaqAnswers(prev => ({ ...prev, [jobId]: { answer: "Error getting answer.", fromData: false } }));
-    }
+  const handleApply = (jobId: string) => run(() => operationClient.invoke('submit_application', { candidateId, jobId, resumeText: candidate?.resumeText || 'My Resume' }, actor));
+  const handleFaq = async (event: FormEvent<HTMLFormElement>, jobId: string) => {
+    event.preventDefault();
+    const question = String(new FormData(event.currentTarget).get('question') ?? '');
+    const result = await run(() => operationClient.invoke('answer_candidate_faq', { jobId, question }, actor));
+    if (result) setFaqAnswers((previous) => ({ ...previous, [jobId]: result as { answer: string; answeredFromData: boolean } }));
   };
-
-
-  const handleOfferResponse = async (offerId: string, decision: string) => {
-    await axios.post(`/api/offers/${offerId}/respond`, { decision });
-    fetchState();
+  const handleBook = (applicationId: string, slot: string) => run(() => operationClient.invoke('book_interview', { applicationId, slot }, actor));
+  const handleResponse = (offerId: string, decision: 'accept' | 'decline' | 'counter') => run(() => decision === 'counter'
+    ? operationClient.invoke('respond_to_offer', { offerId, decision: 'counter', counterAmount: Number(counterAmounts[offerId]) }, actor)
+    : operationClient.invoke('respond_to_offer', { offerId, decision }, actor));
+  const handleBenefits = (offerId: string, selected: PlanSelections) =>
+    run(() => operationClient.invoke('enroll_benefits', { offerId, planSelections: selected }, actor));
+  const handleOnboardingStatus = async (offerId: string) => {
+    const result = await run(() => operationClient.invoke('get_onboarding_status', { offerId }, actor));
+    if (result) setStatusByOffer((previous) => ({ ...previous, [offerId]: result as GetOnboardingStatusOutput }));
   };
-
-  const handleEnrollBenefits = async (offerId: string, plan: string) => {
-    await axios.post(`/api/offers/${offerId}/benefits`, { planSelections: { health: plan } });
-    fetchState();
-  };
-
-  const handleBookInterview = async (applicationId: string, slot: string) => {
-    await axios.post('/api/interviews/book', { applicationId, slot });
-    fetchState();
-  };
-
 
   return (
-    <div className="p-8 max-w-4xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">Welcome, {cand?.name}</h1>
-        <p className="text-gray-500">Find your next role.</p>
-      </div>
-
-
-      {interviews.filter((i: any) => i.status === 'proposed' && myApps.some(a => a.id === i.applicationId)).length > 0 && (
-        <div>
-          <h2 className="text-lg font-semibold mb-4 border-b pb-2">Action Required: Schedule Interview</h2>
-          <div className="space-y-4">
-            {myApps.map(app => {
-              const appInterviews = interviews.filter((i: any) => i.applicationId === app.id && i.status === 'proposed');
-              if (appInterviews.length === 0) return null;
-              const job = jobs.find(j => j.id === app.jobId);
-              return (
-                <div key={app.id} className="bg-blue-50 border border-blue-200 p-5 rounded-xl shadow-sm">
-                  <h3 className="font-bold text-blue-900 text-lg mb-2">Pick your interview time for {job?.title}</h3>
-                  <div className="flex gap-2 flex-wrap">
-                    {appInterviews.map((i: any) => (
-                      <button 
-                        key={i.id} 
-                        onClick={() => handleBookInterview(app.id, i.slot)}
-                        className="px-4 py-2 bg-white text-blue-700 border border-blue-300 rounded-lg text-sm font-medium hover:bg-blue-50 transition-colors"
-                      >
-                        {new Date(i.slot).toLocaleString()}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {myOffers.length > 0 && (
-
-        <div>
-          <h2 className="text-lg font-semibold mb-4 border-b pb-2">Your Offers</h2>
-          <div className="space-y-4">
-            {myOffers.map(offer => (
-              <div key={offer.id} className="bg-green-50 border border-green-200 p-5 rounded-xl shadow-sm">
-                <div className="flex justify-between items-center mb-4">
-                  <div>
-                    <h3 className="font-bold text-green-900 text-lg">Offer Extended</h3>
-                    <p className="text-green-800 font-medium">Compensation: ${offer.compAmount.toLocaleString()}</p>
-                  </div>
-                  <span className="px-3 py-1 rounded-full text-sm font-semibold bg-green-200 text-green-900 capitalize">{offer.status}</span>
-                </div>
-                {offer.status === 'sent' && (
-                  <div className="flex gap-3 mt-4">
-                    <button onClick={() => handleOfferResponse(offer.id, 'accepted')} className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors">Accept Offer</button>
-                    <button onClick={() => handleOfferResponse(offer.id, 'declined')} className="px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 transition-colors">Decline</button>
-                  </div>
-                )}
-                {offer.status === 'accepted' && (
-                  <div className="mt-4 pt-4 border-t border-green-200">
-                    <h4 className="font-semibold text-green-900 mb-2">Next Steps (Post-Offer)</h4>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-green-800">Background Check:</span>
-                        <span className="font-medium">{offer.backgroundCheckStatus || 'Not started'}</span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-green-800">Benefits Enrollment:</span>
-                        {offer.benefitsEnrolled ? (
-                          <span className="font-medium">Complete</span>
-                        ) : (
-                          <div className="flex gap-2 items-center">
-                            <select id={`plan-${offer.id}`} className="text-xs border border-green-300 rounded p-1 bg-white">
-                              <option value="ppo">PPO Premium</option>
-                              <option value="hmo">HMO Standard</option>
-                            </select>
-                            <button 
-                              onClick={() => {
-                                const val = (document.getElementById(`plan-${offer.id}`) as HTMLSelectElement).value;
-                                handleEnrollBenefits(offer.id, val);
-                              }}
-                              className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700 transition-colors"
-                            >
-                              Enroll
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div>
-        <h2 className="text-lg font-semibold mb-4 border-b pb-2">Open Roles</h2>
-        <div className="space-y-4">
-          {jobs.map(job => {
-            const applied = myApps.some(a => a.jobId === job.id);
-
-            return (
-              <div key={job.id} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-4">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h3 className="font-semibold text-gray-900 text-lg">{job.title}</h3>
-                    <p className="text-sm text-gray-500 mt-1">{job.department} &middot; {job.compBand}</p>
-                  </div>
-                  {applied ? (
-                    <span className="flex items-center gap-1 text-sm font-medium text-green-600 bg-green-50 px-3 py-1.5 rounded-full"><CheckCircle className="w-4 h-4" /> Applied</span>
-                  ) : (
-                    <button onClick={() => handleApply(job.id)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">Apply Now</button>
-                  )}
-                </div>
-                
-                <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
-                  <h4 className="text-sm font-semibold mb-2">Ask about this role</h4>
-                  <form onSubmit={(e) => handleAskFaq(e, job.id)} className="flex gap-2 mb-2">
-                    <input name="question" placeholder="E.g., What are the requirements?" required className="flex-1 border rounded p-2 text-sm" />
-                    <button type="submit" className="bg-slate-200 text-slate-800 px-3 py-2 rounded text-sm hover:bg-slate-300 font-medium">Ask AI</button>
-                  </form>
-                  {faqAnswers[job.id] && (
-                    <div className={`p-3 rounded text-sm ${faqAnswers[job.id].fromData ? 'bg-blue-50 text-blue-900 border border-blue-100' : 'bg-orange-50 text-orange-900 border border-orange-100'}`}>
-                      <strong>Answer:</strong> {faqAnswers[job.id].answer}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-})}
-        </div>
-      </div>
+    <div className="p-8 max-w-5xl mx-auto space-y-8">
+      <div><h1 className="text-2xl font-bold text-gray-900">Welcome, {candidate?.name}</h1><p className="text-gray-500">Applications, interviews, offers, and onboarding use the persisted shared snapshot.</p></div>
+      {error && <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>}
+      {myApplications.some((application) => interviews.some((interview) => interview.applicationId === application.id && interview.status === 'proposed')) && <section><h2 className="text-lg font-semibold mb-3">Choose an interview slot</h2><div className="space-y-3">{myApplications.map((application) => <div key={application.id}>{interviews.filter((interview) => interview.applicationId === application.id && interview.status === 'proposed').map((interview) => <button key={interview.id} onClick={() => void handleBook(application.id, interview.slot)} className="mr-2 mb-2 px-3 py-2 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg text-sm">{new Date(interview.slot).toLocaleString()}</button>)}</div>)}</div></section>}
+      <section><h2 className="text-lg font-semibold mb-3">Your offers</h2><div className="space-y-4">{myOffers.map((offer) => {
+        const application = myApplications.find((item) => item.id === offer.applicationId);
+        const background = backgroundChecks.find((check) => check.offerId === offer.id);
+        const enrollment = benefitsEnrollments.find((item) => item.offerId === offer.id);
+        const tasks = onboardingTasks.filter((task) => task.offerId === offer.id);
+        const selected = benefitSelections[offer.id] ?? {
+          medical: catalogs.planCatalog.medical[0] ?? '',
+          dental: catalogs.planCatalog.dental[0] ?? '',
+          vision: catalogs.planCatalog.vision[0] ?? ''
+        };
+        return <article key={offer.id} className="bg-green-50 border border-green-200 p-5 rounded-xl shadow-sm"><div className="flex justify-between"><div><h3 className="font-bold text-green-900">Offer for {jobs.find((job) => job.id === application?.jobId)?.title}</h3><p className="text-green-800">{offer.compAmount.toLocaleString()} {offer.currency}</p></div><span className="capitalize font-semibold">{offer.status}</span></div>{offer.status === 'sent' && <div className="flex flex-wrap gap-2 mt-4"><button onClick={() => void handleResponse(offer.id, 'accept')} className="px-3 py-2 bg-green-600 text-white rounded">Accept</button><button onClick={() => void handleResponse(offer.id, 'decline')} className="px-3 py-2 bg-white border rounded">Decline</button><input type="number" placeholder="Counter" value={counterAmounts[offer.id] ?? ''} onChange={(event) => setCounterAmounts((previous) => ({ ...previous, [offer.id]: event.target.value }))} className="w-28 border rounded px-2" /><button onClick={() => void handleResponse(offer.id, 'counter')} className="px-3 py-2 bg-white border rounded">Counter</button></div>}{offer.status === 'accepted' && <div className="mt-4 pt-3 border-t border-green-200 text-sm space-y-2"><p>Application: {application?.status}</p><p>Background check: <strong>{background?.status ?? 'not started'}</strong></p><p>Benefits: <strong>{enrollment ? 'enrolled' : 'not enrolled'}</strong>{!enrollment && <span className="ml-2 inline-flex flex-wrap gap-1"><select aria-label="Medical plan" value={selected.medical} onChange={(event) => setBenefitSelections((previous) => ({ ...previous, [offer.id]: { ...selected, medical: event.target.value } }))} className="border rounded px-1"><option value="">Medical</option>{catalogs.planCatalog.medical.map((plan) => <option key={plan} value={plan}>{plan}</option>)}</select><select aria-label="Dental plan" value={selected.dental} onChange={(event) => setBenefitSelections((previous) => ({ ...previous, [offer.id]: { ...selected, dental: event.target.value } }))} className="border rounded px-1"><option value="">Dental</option>{catalogs.planCatalog.dental.map((plan) => <option key={plan} value={plan}>{plan}</option>)}</select><select aria-label="Vision plan" value={selected.vision} onChange={(event) => setBenefitSelections((previous) => ({ ...previous, [offer.id]: { ...selected, vision: event.target.value } }))} className="border rounded px-1"><option value="">Vision</option>{catalogs.planCatalog.vision.map((plan) => <option key={plan} value={plan}>{plan}</option>)}</select><button onClick={() => void handleBenefits(offer.id, selected)} className="text-green-700 underline">Enroll</button></span>}</p><p>Tasks: {tasks.filter((task) => task.status === 'complete').length}/{tasks.length} complete</p><button onClick={() => void handleOnboardingStatus(offer.id)} className="text-orange-700 underline">Refresh onboarding status</button>{statusByOffer[offer.id] && <pre className="text-xs bg-white p-2 rounded overflow-auto">{json(statusByOffer[offer.id])}</pre>}</div>}</article>;
+      })}{myOffers.length === 0 && <p className="text-gray-500">No offers yet.</p>}</div></section>
+      <section><h2 className="text-lg font-semibold mb-3">Open roles</h2><div className="space-y-4">{jobs.filter((job) => job.status === 'open').map((job) => { const applied = myApplications.some((application) => application.jobId === job.id); return <article key={job.id} className="bg-white p-5 rounded-xl border border-gray-200"><div className="flex justify-between items-start"><div><h3 className="font-semibold text-lg">{job.title}</h3><p className="text-sm text-gray-500">{job.department} · {job.compBand.min.toLocaleString()}–{job.compBand.max.toLocaleString()} {job.compBand.currency}</p></div>{applied ? <span className="text-green-700 flex items-center gap-1"><CheckCircle className="w-4 h-4" /> Applied</span> : <button onClick={() => void handleApply(job.id)} className="px-3 py-2 bg-blue-600 text-white rounded">Apply</button>}</div><form onSubmit={(event) => void handleFaq(event, job.id)} className="flex gap-2 mt-4"><input name="question" required placeholder="Ask about requirements or compensation" className="flex-1 border rounded p-2 text-sm" /><button className="px-3 py-2 bg-slate-200 rounded text-sm">Ask</button></form>{faqAnswers[job.id] && <p className="mt-2 text-sm p-2 rounded bg-blue-50">{faqAnswers[job.id].answer} <span className="text-xs">({faqAnswers[job.id].answeredFromData ? 'from requisition data' : 'unanswered'})</span></p>}</article>; })}</div></section>
     </div>
   );
 };
 
 const HiringManagerView = () => {
-  const { interviews, applications, candidates, jobs, fetchState } = useStore();
-  const [prepKit, setPrepKit] = useState<any>(null);
-  const [loadingKit, setLoadingKit] = useState<boolean>(false);
-  
-  const pendingInterviews = interviews.filter((i: any) => i.status === 'scheduled');
+  const { interviews, applications, candidates, jobs } = useStore();
+  const [kits, setKits] = useState<Record<string, GetInterviewKitOutput>>({});
+  const [summaries, setSummaries] = useState<Record<string, GetPanelFeedbackSummaryOutput>>({});
+  const [error, setError] = useOperationError();
+  const actor = actorContextForRole('hiring-manager');
+  const pendingInterviews = interviews.filter((interview) => interview.status === 'booked');
 
-
-  const handleSubmitScorecard = async (e: React.FormEvent, interviewId: string) => {
-    e.preventDefault();
-    const form = e.target as HTMLFormElement;
-       
-    await axios.post(`/api/interviews/${interviewId}/feedback`, {
-      interviewer: "hm-1",
-      competencyScores: {
-        technical: parseInt(form.technical.value, 10),
-        communication: parseInt(form.communication.value, 10)
-      },
-      recommendation: form.recommendation.value,
-      comments: form.comments.value
-    });
-       
-    fetchState();
+  const run = async (operation: () => Promise<unknown>) => { try { setError(null); return await operation(); } catch (caught) { setError(caught); return undefined; } };
+  const loadKit = async (jobId: string) => { const result = await run(() => operationClient.invoke('get_interview_kit', { jobId }, actor)); if (result) setKits((previous) => ({ ...previous, [jobId]: result as GetInterviewKitOutput })); };
+  const loadSummary = async (applicationId: string) => { const result = await run(() => operationClient.invoke('get_panel_feedback_summary', { applicationId }, actor)); if (result) setSummaries((previous) => ({ ...previous, [applicationId]: result as GetPanelFeedbackSummaryOutput })); };
+  const submitFeedback = async (event: FormEvent<HTMLFormElement>, interviewId: string, jobId: string) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const competencies = kits[jobId]?.competencies ?? [{ name: 'Overall', questions: [] }];
+    const competencyScores: Record<string, number> = {};
+    for (const competency of competencies) competencyScores[competency.name] = Number(data.get(`score-${competency.name}`));
+    const result = await run(() => operationClient.invoke('submit_interview_feedback', {
+      interviewId,
+      interviewer: actor.actorId,
+      competencyScores,
+      recommendation: String(data.get('recommendation')) as 'strong_yes' | 'yes' | 'no' | 'strong_no',
+      comments: String(data.get('comments') ?? '')
+    }, actor));
+    if (result) form.reset();
   };
 
-
-  const handleViewPrep = async (jobId: string) => {
-    setLoadingKit(true);
-    setPrepKit({ loading: true }); // Open modal in loading state
-    try {
-      const res = await axios.get(`/api/jobs/${jobId}/interview-kit`);
-      setPrepKit(res.data);
-    } catch (e) {
-      setPrepKit({ error: true });
-    } finally {
-      setLoadingKit(false);
-    }
-  };
-
-  return (
-    <div className="p-8 max-w-4xl mx-auto space-y-8 relative">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">Hiring Manager Portal</h1>
-        <p className="text-gray-500">Review pending scorecards and interview pipeline.</p>
-      </div>
-
-      <div>
-        <h2 className="text-lg font-semibold mb-4 border-b pb-2">Pending Scorecards</h2>
-        {pendingInterviews.length === 0 ? (
-          <div className="bg-gray-50 border border-gray-200 rounded-xl p-8 text-center text-gray-500">
-             <Clock className="w-12 h-12 mx-auto text-gray-300 mb-3" />
-             No pending scorecards to review. Your pipeline is clean!
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {pendingInterviews.map((interview: any) => {
-               const app = applications.find((a: any) => a.id === interview.applicationId);
-               const cand = candidates.find((c: any) => c.id === app?.candidateId);
-               const job = jobs.find((j: any) => j.id === app?.jobId);
-               
-               return (
-                 <div key={interview.id} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative">
-                   <div className="mb-4">
-                     <div className="flex justify-between items-start">
-                       <div>
-                         <h3 className="font-bold text-gray-900 text-lg">{cand?.name}</h3>
-                         <p className="text-sm text-gray-500">Interview for: {job?.title} &middot; Slot: {interview.slot}</p>
-                       </div>
-                       <button onClick={() => handleViewPrep(job.id)} className="text-blue-600 hover:text-blue-800 text-sm font-medium border border-blue-200 hover:bg-blue-50 px-3 py-1.5 rounded-md transition-colors">
-                         View Interview Prep
-                       </button>
-                     </div>
-                   </div>
-                   
-
-                  <form onSubmit={(e) => handleSubmitScorecard(e, interview.id)} className="space-y-4 mt-6 border-t pt-4">
-                    {prepKit && !prepKit.loading && !prepKit.error && (
-                      <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl mb-4">
-                        <h4 className="font-semibold text-blue-900 mb-2">Interview Kit</h4>
-                        <div className="space-y-3">
-                          {prepKit.competencies?.map((comp: any, idx: number) => (
-                            <div key={idx} className="bg-white p-3 rounded shadow-sm border border-blue-100 text-sm">
-                              <div className="font-bold text-blue-800 mb-1">{comp.name || comp.competency}</div>
-                              <ul className="list-disc pl-5 text-gray-700 space-y-1">
-                                {comp.questions ? comp.questions.map((q: string, i: number) => <li key={i}>{q}</li>) : <li>{comp.question} (Expected: {comp.expectedSignal})</li>}
-                              </ul>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    
-                    <h4 className="font-semibold text-gray-900 mb-2">Scorecard</h4>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Technical Skills (1-5)</label>
-                        <select name="technical" className="w-full border rounded p-2 text-sm bg-white" required>
-                          {[1,2,3,4,5].map(n => <option key={n} value={n}>{n}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Communication (1-5)</label>
-                        <select name="communication" className="w-full border rounded p-2 text-sm bg-white" required>
-                          {[1,2,3,4,5].map(n => <option key={n} value={n}>{n}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Overall Recommendation</label>
-                      <select name="recommendation" className="w-full border rounded p-2 text-sm bg-white" required>
-                        <option value="no_hire">No Hire</option>
-                        <option value="hire">Hire</option>
-                        <option value="strong_hire">Strong Hire</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Comments</label>
-                      <textarea name="comments" className="w-full border rounded p-2 text-sm bg-white" rows={3}></textarea>
-                    </div>
-                    <button type="submit" className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 transition-colors">
-                      Submit Scorecard
-                    </button>
-                  </form>
-
-                 </div>
-               );
-            })}
-          </div>
-        )}
-      </div>
-
-      {prepKit && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden shadow-2xl">
-            <div className="px-6 py-4 border-b flex justify-between items-center bg-gray-50">
-              <h2 className="text-xl font-bold text-gray-900">AI Interview Kit</h2>
-              <button onClick={() => setPrepKit(null)} className="text-gray-400 hover:text-gray-600 p-1"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="p-6 overflow-y-auto flex-1">
-              {loadingKit ? (
-                <div className="flex flex-col items-center justify-center py-12 text-gray-500">
-                  <Activity className="w-8 h-8 animate-pulse text-blue-500 mb-4" />
-                  <p>Generating personalized questions based on job requirements...</p>
-                </div>
-              ) : prepKit.error ? (
-                <div className="text-red-500 text-center py-8">Failed to load interview kit.</div>
-              ) : (
-                <div className="space-y-6">
-                  {prepKit.questions?.map((q: any, i: number) => (
-                    <div key={i} className="border border-gray-200 rounded-xl p-5 bg-white shadow-sm">
-                      <div className="text-xs font-bold uppercase tracking-wider text-blue-600 mb-2">{q.competency}</div>
-                      <p className="font-semibold text-gray-900 mb-3 text-lg">{q.question}</p>
-                      <div className="bg-green-50 p-3 rounded-lg border border-green-100">
-                        <span className="text-xs font-bold text-green-800 uppercase block mb-1">Expected Signal</span>
-                        <p className="text-sm text-green-900">{q.expectedSignal}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  return <div className="p-8 max-w-5xl mx-auto space-y-8"><div><h1 className="text-2xl font-bold">Hiring Manager Portal</h1><p className="text-gray-500">Prepare from the role template and submit validated scorecards.</p></div>{error && <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>}<section><h2 className="text-lg font-semibold mb-3">Booked interviews</h2>{pendingInterviews.length === 0 && <p className="text-gray-500">No booked interviews awaiting feedback.</p>}<div className="space-y-4">{pendingInterviews.map((interview) => { const application = applications.find((item) => item.id === interview.applicationId); const candidate = candidates.find((item) => item.id === application?.candidateId); const job = jobs.find((item) => item.id === application?.jobId); const kit = job ? kits[job.id] : undefined; return <article key={interview.id} className="bg-white border rounded-xl p-5 shadow-sm"><div className="flex justify-between items-start"><div><h3 className="font-semibold">{candidate?.name}</h3><p className="text-sm text-gray-500">{job?.title} · {new Date(interview.slot).toLocaleString()}</p></div>{job && <button onClick={() => void loadKit(job.id)} className="text-blue-700 text-sm underline">Load interview kit</button>}</div>{kit && <div className="bg-blue-50 rounded p-3 mt-3 text-sm space-y-2">{kit.competencies.map((competency) => <div key={competency.name}><strong>{competency.name}</strong><ul className="list-disc pl-5">{competency.questions.map((question) => <li key={question}>{question}</li>)}</ul></div>)}</div>}<form onSubmit={(event) => void submitFeedback(event, interview.id, job?.id ?? '')} className="mt-4 border-t pt-4 space-y-3"><div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{(kit?.competencies ?? [{ name: 'Overall', questions: [] }]).map((competency) => <label key={competency.name} className="text-sm">{competency.name} score<select name={`score-${competency.name}`} defaultValue="3" className="block w-full border rounded p-2"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></label>)}</div><select name="recommendation" defaultValue="yes" className="w-full border rounded p-2"><option value="strong_yes">Strong yes</option><option value="yes">Yes</option><option value="no">No</option><option value="strong_no">Strong no</option></select><textarea name="comments" required placeholder="Comments" className="w-full border rounded p-2" /><button className="bg-green-600 text-white rounded px-3 py-2">Submit scorecard</button></form>{application && <button onClick={() => void loadSummary(application.id)} className="mt-3 text-sm text-indigo-700 underline">Load panel summary</button>}{application && summaries[application.id] && <pre className="mt-2 text-xs bg-gray-50 rounded p-3 overflow-auto">{json(summaries[application.id])}</pre>}</article>; })}</div></section></div>;
 };
 
-
 export default function App() {
-  const { currentRole, fetchState } = useStore();
-  const [runTour, setRunTour] = useState(false);
+  const currentRole = useStore((state) => state.currentRole);
+  const [bootError, setBootError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchState();
-    registerAllTools(fetchState);
-
-    if (!localStorage.getItem('pipeline-tour-completed')) {
-      setRunTour(true);
-    }
+    const synchronization = createSynchronizationController();
+    void synchronization.start().catch((error) => setBootError(errorMessage(error)));
+    registerAllTools();
+    return () => synchronization.stop();
   }, []);
 
-  const handleJoyrideCallback = (data: any) => {
-    const { status } = data;
-    if (['finished', 'skipped'].includes(status)) {
-      setRunTour(false);
-      localStorage.setItem('pipeline-tour-completed', 'true');
-    }
-  };
-
-  const steps: any[] = [
-    {
-      target: '.tour-role-switcher',
-      content: 'Welcome to PipelineOS! Switch between Recruiter, Candidate, and Hiring Manager views here to experience different personas.',
-      placement: 'right',
-      disableBeacon: true,
-    },
-    {
-      target: '.tour-main-content',
-      content: 'This is the main workspace. Data changes instantly depending on your selected persona. Try simulating actions like scheduling interviews!',
-      placement: 'center',
-    },
-    {
-      target: '.tour-agent-log',
-      content: 'As you navigate and trigger actions, watch the AI Agent activity stream right here. It actively logs the background WebMCP tasks processing your workflow.',
-      placement: 'left',
-    }
-  ];
-
-  return (
-    <BrowserRouter>
-      <div className="flex h-screen w-full bg-gray-50 overflow-hidden font-sans">
-        <Joyride
-          steps={steps}
-          run={runTour}
-          continuous
-          showSkipButton
-          showProgress
-          callback={handleJoyrideCallback}
-          styles={{
-            // @ts-ignore
-            options: {
-              primaryColor: '#2563eb',
-            },
-          }}
-        />
-        <Navigation onStartTour={() => setRunTour(true)} />
-        
-        <main className="flex-1 h-full overflow-y-auto tour-main-content">
-          {currentRole === 'recruiter' && <RecruiterView />}
-          {currentRole === 'candidate' && <CandidateView />}
-          {currentRole === 'hiring-manager' && <HiringManagerView />}
-          {currentRole === 'documentation' && <DocumentationView />}
-        </main>
-        
-        <AgentActivityLog />
-      </div>
-    </BrowserRouter>
-  );
+  return <div className="flex h-screen w-full bg-gray-50 overflow-hidden font-sans"><Navigation /><main className="flex-1 h-full overflow-y-auto tour-main-content">{bootError && <div className="m-6 p-3 bg-red-50 border border-red-200 text-red-700 rounded">{bootError}</div>}{currentRole === 'recruiter' && <RecruiterView />}{currentRole === 'candidate' && <CandidateView />}{currentRole === 'hiring-manager' && <HiringManagerView />}{currentRole === 'documentation' && <DocumentationView />}</main><AgentActivityLog /></div>;
 }
