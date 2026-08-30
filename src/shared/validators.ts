@@ -76,7 +76,7 @@ function matchesDeclaredType(
   type: JsonSchema['type']
 ): boolean {
   if (type === undefined) return true;
-  if (Array.isArray(type)) {
+  if (typeof type !== 'string') {
     return type.some((candidate) => matchesSchemaType(value, candidate));
   }
   return matchesSchemaType(value, type);
@@ -403,6 +403,12 @@ export function validateOperationInput<N extends OperationName>(
   name: N,
   input: unknown
 ): OperationInputMap[N] {
+  if (!isOperationName(name)) {
+    throw new ValidationError('Unknown operation name', {
+      field: 'operationName'
+    });
+  }
+
   const descriptor = getOperationDescriptor(name);
   const issues = validateJsonSchema(input, descriptor.inputSchema);
   if (issues.length > 0) {
@@ -440,6 +446,12 @@ export function validateOperationOutput<N extends OperationName>(
   name: N,
   output: unknown
 ): OperationOutputMap[N] {
+  if (!isOperationName(name)) {
+    throw new ValidationError('Unknown operation name', {
+      field: 'operationName'
+    });
+  }
+
   const descriptor = getOperationDescriptor(name);
   const issues = validateJsonSchema(output, descriptor.outputSchema, 'output');
   if (issues.length > 0) {

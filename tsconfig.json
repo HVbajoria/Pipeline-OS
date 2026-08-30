@@ -15,11 +15,25 @@
     "moduleDetection": "force",
     "allowJs": true,
     "jsx": "react-jsx",
+    "baseUrl": ".",
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@shared/*": [
+        "src/shared/*"
+      ],
+      "@server/*": [
+        "src/server/*"
+      ],
+      "@client/*": [
+        "src/client/*"
       ]
     },
+    "types": [
+      "node",
+      "vitest/globals"
+    ],
     "allowImportingTsExtensions": true,
     "noEmit": true
   }

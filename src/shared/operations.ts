@@ -73,6 +73,9 @@ export interface JsonSchema {
   maxProperties?: number;
 }
 
+/** Common spelling used by WebMCP/JSON Schema integrations. */
+export type JSONSchema = JsonSchema;
+
 /** The exact set of operations exposed by PipelineOS. */
 export const OPERATION_NAMES = [
   'create_job_requisition',
@@ -257,7 +260,9 @@ export interface GetPanelFeedbackSummaryInput {
   applicationId: string;
 }
 
-export type RecommendationTally = Record<ScorecardRecommendation, number>;
+export type RecommendationTally = Partial<
+  Record<ScorecardRecommendation, number>
+>;
 
 export interface GetPanelFeedbackSummaryOutput {
   averageScores: Record<string, number>;
@@ -647,7 +652,7 @@ export const OPERATION_REGISTRY = {
             properties: {
               candidateId: idSchema,
               name: requiredStringSchema,
-              matchScore: { type: 'number', minimum: 0, maximum: 1 },
+              matchScore: { type: 'number', minimum: 0 },
               rationale: requiredStringSchema
             },
             required: ['candidateId', 'name', 'matchScore', 'rationale'],
@@ -943,7 +948,6 @@ export const OPERATION_REGISTRY = {
             no: { type: 'number', minimum: 0 },
             strong_no: { type: 'number', minimum: 0 }
           },
-          required: ['strong_yes', 'yes', 'no', 'strong_no'],
           additionalProperties: false
         },
         scorecards: {
@@ -1178,6 +1182,7 @@ export const OPERATION_REGISTRY = {
 /** Alias with a descriptive lower-case name for consumers that prefer it. */
 export const operationRegistry = OPERATION_REGISTRY;
 export const OPERATION_DESCRIPTORS = OPERATION_REGISTRY;
+export const OPERATIONS = OPERATION_REGISTRY;
 
 export function isOperationName(value: unknown): value is OperationName {
   return (
