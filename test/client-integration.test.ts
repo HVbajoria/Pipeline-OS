@@ -4,7 +4,12 @@ import { OperationClient, type FetchLike } from '../src/client/operationClient';
 import { SynchronizationController } from '../src/client/synchronization';
 import { useStore } from '../src/lib/store';
 import { projectActivityFeed, projectKanban } from '../src/lib/viewModels';
-import { registerAllTools, resetWebMcpRegistry, WebMcpRuntimeAdapter } from '../src/lib/webmcp';
+import {
+  getWebMcpRegistrationDiagnostics,
+  registerAllTools,
+  resetWebMcpRegistry,
+  WebMcpRuntimeAdapter
+} from '../src/lib/webmcp';
 import { PipelineError } from '../src/shared/errors';
 import type { SharedStateProjectionWithCatalogs } from '../src/shared/models';
 import { OPERATION_NAMES, OPERATION_REGISTRY } from '../src/shared/operations';
@@ -162,7 +167,7 @@ describe('typed client, WebMCP, store, and synchronization integration', () => {
     expect(result).toHaveProperty('results');
     const after = domainCollections(serializeSharedState(service.repository.read()));
     expect(after).toEqual(before);
-    expect(tools).toHaveLength(19);
+    expect(tools).toHaveLength(OPERATION_NAMES.length);
     expect(tools.map((tool) => tool.name)).toEqual(OPERATION_NAMES);
     expect(OPERATION_REGISTRY.search_candidates.annotations).toEqual({ readOnlyHint: true });
   });
@@ -182,13 +187,21 @@ describe('typed client, WebMCP, store, and synchronization integration', () => {
       });
       delete (globalThis as { navigator?: unknown }).navigator;
       registerAllTools({ client, force: true });
-      expect(nativeCalls).toHaveLength(19);
+      expect(nativeCalls).toHaveLength(OPERATION_NAMES.length);
       expect(nativeCalls[0]).toMatchObject({
         name: 'create_job_requisition',
         inputSchema: OPERATION_REGISTRY.create_job_requisition.inputSchema,
         annotations: { readOnlyHint: false }
       });
       expect(nativeCalls[0]).not.toHaveProperty('schema');
+      const nativePublicTool = nativeCalls.find(
+        (tool) => (tool as { name?: unknown }).name === 'search_public_candidates'
+      ) as { inputSchema?: unknown; annotations?: unknown; execute?: unknown } | undefined;
+      expect(nativePublicTool).toMatchObject({
+        inputSchema: OPERATION_REGISTRY.search_public_candidates.inputSchema,
+        annotations: { readOnlyHint: true }
+      });
+      expect(nativePublicTool?.execute).toEqual(expect.any(Function));
 
       delete (globalThis as { document?: unknown }).document;
       Object.defineProperty(globalThis, 'navigator', {
@@ -196,13 +209,139 @@ describe('typed client, WebMCP, store, and synchronization integration', () => {
         value: { modelContext: { registerTool: (tool: unknown) => polyfillCalls.push(tool) } }
       });
       registerAllTools({ client, force: true });
-      expect(polyfillCalls).toHaveLength(19);
+      expect(polyfillCalls).toHaveLength(OPERATION_NAMES.length);
       expect(polyfillCalls[0]).toMatchObject({
         name: 'create_job_requisition',
         schema: OPERATION_REGISTRY.create_job_requisition.inputSchema,
         annotations: { readOnlyHint: false }
       });
       expect(polyfillCalls[0]).not.toHaveProperty('inputSchema');
+      const polyfillPublicTool = polyfillCalls.find(
+        (tool) => (tool as { name?: unknown }).name === 'search_public_candidates'
+      ) as { schema?: unknown; annotations?: unknown; handler?: unknown } | undefined;
+      expect(polyfillPublicTool).toMatchObject({
+        schema: OPERATION_REGISTRY.search_public_candidates.inputSchema,
+        annotations: { readOnlyHint: true }
+      });
+      expect(polyfillPublicTool?.handler).toEqual(expect.any(Function));
+    } finally {
+      if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument);
+      else delete (globalThis as { document?: unknown }).document;
+      if (originalNavigator) Object.defineProperty(globalThis, 'navigator', originalNavigator);
+      else delete (globalThis as { navigator?: unknown }).navigator;
+      resetWebMcpRegistry();
+    }
+  });
+
+  it('registers all 20 descriptors in the development fallback registry', () => {
+    const service = new OperationService(new SharedStateRepository(createSeed()), defaultOperationHandlers);
+    const client = new OperationClient({ fetcher: serviceFetch(service), refreshState: async () => undefined });
+    const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+    const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+
+    try {
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+      delete (globalThis as { document?: unknown }).document;
+      delete (globalThis as { navigator?: unknown }).navigator;
+      resetWebMcpRegistry();
+      registerAllTools({ client, force: true });
+
+      const registry = (globalThis.window as Window).__webmcp_tools ?? {};
+      expect(Object.keys(registry)).toEqual(OPERATION_NAMES);
+      expect(registry.search_public_candidates).toMatchObject({
+        inputSchema: OPERATION_REGISTRY.search_public_candidates.inputSchema,
+        schema: OPERATION_REGISTRY.search_public_candidates.inputSchema,
+        annotations: { readOnlyHint: true }
+      });
+      expect(registry.search_public_candidates.execute).toEqual(expect.any(Function));
+    } finally {
+      if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+      else delete (globalThis as { window?: unknown }).window;
+      if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument);
+      else delete (globalThis as { document?: unknown }).document;
+      if (originalNavigator) Object.defineProperty(globalThis, 'navigator', originalNavigator);
+      else delete (globalThis as { navigator?: unknown }).navigator;
+      resetWebMcpRegistry();
+    }
+  });
+
+  it('routes the public prospect descriptor through the canonical operation client with supported input only', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const output = { prospects: [], query: 'backend', filters: { query: 'backend' }, source: 'github' };
+    const client = new OperationClient({
+      fetcher: async (request, init) => {
+        calls.push({ url: String(request), init });
+        return jsonResponse(output);
+      },
+      refreshState: async () => undefined
+    });
+    const tools: ReturnType<typeof registerAllTools> = [];
+    const adapter = new class extends WebMcpRuntimeAdapter {
+      register(tool: (typeof tools)[number]): 'development' {
+        tools.push(tool);
+        return 'development';
+      }
+    }();
+
+    resetWebMcpRegistry();
+    registerAllTools({ client, adapter, force: true });
+    const publicTool = tools.find((tool) => tool.name === 'search_public_candidates');
+    expect(publicTool).toBeDefined();
+
+    await expect(
+      publicTool!.execute({
+        query: 'backend',
+        language: 'TypeScript',
+        location: 'Berlin'
+      })
+    ).resolves.toEqual(output);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('/api/operations/search_public_candidates');
+    expect(calls[0].init?.method).toBe('POST');
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({
+      input: {
+        query: 'backend',
+        language: 'TypeScript',
+        location: 'Berlin'
+      }
+    });
+    expect(JSON.stringify(JSON.parse(String(calls[0].init?.body)))).not.toContain('experienceLevel');
+    expect(JSON.stringify(JSON.parse(String(calls[0].init?.body)))).not.toContain('maxResults');
+    expect(new Headers(calls[0].init?.headers).get('x-actor-id')).toBe('agent-demo');
+    resetWebMcpRegistry();
+  });
+
+  it('observes rejected native registrations without changing synchronous registration', async () => {
+    const service = new OperationService(new SharedStateRepository(createSeed()), defaultOperationHandlers);
+    const client = new OperationClient({ fetcher: serviceFetch(service), refreshState: async () => undefined });
+    const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+    const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    const rejection = new Error('native registration rejected');
+
+    try {
+      Object.defineProperty(globalThis, 'document', {
+        configurable: true,
+        value: {
+          modelContext: {
+            registerTool: () => Promise.reject(rejection)
+          }
+        }
+      });
+      delete (globalThis as { navigator?: unknown }).navigator;
+      resetWebMcpRegistry();
+
+      const tools = registerAllTools({ client, force: true });
+      expect(tools).toHaveLength(OPERATION_NAMES.length);
+      expect(getWebMcpRegistrationDiagnostics()).toEqual([]);
+
+      await Promise.resolve();
+
+      const diagnostics = getWebMcpRegistrationDiagnostics();
+      expect(diagnostics).toHaveLength(OPERATION_NAMES.length);
+      expect(diagnostics.map((diagnostic) => diagnostic.toolName)).toEqual(OPERATION_NAMES);
+      expect(diagnostics.every((diagnostic) => diagnostic.error === rejection)).toBe(true);
     } finally {
       if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument);
       else delete (globalThis as { document?: unknown }).document;

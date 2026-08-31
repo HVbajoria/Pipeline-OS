@@ -15,6 +15,7 @@ import proposeInterviewSlots from './proposeInterviewSlots';
 import respondToOffer from './respondToOffer';
 import screenCandidate from './screenCandidate';
 import searchCandidates from './searchCandidates';
+import searchPublicCandidates from './searchPublicCandidates';
 import sendOffer from './sendOffer';
 import submitApplication from './submitApplication';
 import submitInterviewFeedback from './submitInterviewFeedback';
@@ -23,6 +24,7 @@ import submitInterviewFeedback from './submitInterviewFeedback';
 export const defaultOperationHandlers: OperationHandlerMap = {
   create_job_requisition: createJobRequisition,
   search_candidates: searchCandidates,
+  search_public_candidates: searchPublicCandidates,
   get_candidate_profile: getCandidateProfile,
   submit_application: submitApplication,
   screen_candidate: screenCandidate,

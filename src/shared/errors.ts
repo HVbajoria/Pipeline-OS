@@ -4,9 +4,12 @@ export type PipelineErrorCode =
   | 'VALIDATION_ERROR'
   | 'NOT_FOUND_ERROR'
   | 'CONFLICT_ERROR'
+  | 'FORBIDDEN_ERROR'
+  | 'RATE_LIMITED_ERROR'
+  | 'UPSTREAM_ERROR'
   | 'INTERNAL_ERROR';
 
-export type PipelineErrorStatus = 400 | 404 | 409 | 500;
+export type PipelineErrorStatus = 400 | 403 | 404 | 409 | 429 | 500 | 502;
 
 export interface PipelineErrorDetails {
   field?: string;
@@ -45,16 +48,22 @@ export interface PipelineErrorInit {
 
 const STATUS_BY_CODE: Readonly<Record<PipelineErrorCode, PipelineErrorStatus>> = {
   VALIDATION_ERROR: 400,
+  FORBIDDEN_ERROR: 403,
   NOT_FOUND_ERROR: 404,
   CONFLICT_ERROR: 409,
-  INTERNAL_ERROR: 500
+  RATE_LIMITED_ERROR: 429,
+  INTERNAL_ERROR: 500,
+  UPSTREAM_ERROR: 502
 };
 
 function isPipelineErrorCode(value: unknown): value is PipelineErrorCode {
   return (
     value === 'VALIDATION_ERROR' ||
+    value === 'FORBIDDEN_ERROR' ||
     value === 'NOT_FOUND_ERROR' ||
     value === 'CONFLICT_ERROR' ||
+    value === 'RATE_LIMITED_ERROR' ||
+    value === 'UPSTREAM_ERROR' ||
     value === 'INTERNAL_ERROR'
   );
 }
@@ -194,6 +203,48 @@ export class ConflictError extends PipelineError {
     super('CONFLICT_ERROR', message, details);
     this.name = 'ConflictError';
   }
+}
+
+export class ForbiddenError extends PipelineError {
+  constructor(message = 'You do not have permission to perform this action', details?: PipelineErrorDetails) {
+    super('FORBIDDEN_ERROR', message, details);
+    this.name = 'ForbiddenError';
+  }
+}
+
+export class RateLimitedError extends PipelineError {
+  constructor(message = 'The upstream service rate limit was reached', details?: PipelineErrorDetails) {
+    super('RATE_LIMITED_ERROR', message, details);
+    this.name = 'RateLimitedError';
+  }
+}
+
+export class UpstreamError extends PipelineError {
+  constructor(message = 'The upstream service returned an error', details?: PipelineErrorDetails) {
+    super('UPSTREAM_ERROR', message, details);
+    this.name = 'UpstreamError';
+  }
+}
+
+export function forbiddenError(
+  message = 'You do not have permission to perform this action',
+  details?: PipelineErrorDetails
+): ForbiddenError {
+  return new ForbiddenError(message, details);
+}
+
+export function rateLimitedError(
+  message = 'The upstream service rate limit was reached',
+  details?: PipelineErrorDetails
+): RateLimitedError {
+  return new RateLimitedError(message, details);
+}
+
+export function upstreamError(
+  message = 'The upstream service returned an error',
+  details?: PipelineErrorDetails
+): UpstreamError {
+  return new UpstreamError(message, details);
 }
 
 export class InternalError extends PipelineError {

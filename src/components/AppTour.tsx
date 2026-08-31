@@ -102,7 +102,7 @@ export function getAppTourSteps(includeDocumentation = false): Step[] {
       target: TOUR_TARGETS.documentationRegistry,
       title: 'The registry is the source of tool documentation',
       content:
-        'This view renders all 19 descriptors from the canonical operation registry. The same metadata powers HTTP validation, native modelContext registration, the fallback polyfill, and this documentation.',
+        'This view renders all 20 descriptors from the canonical operation registry. The same metadata powers HTTP validation, native modelContext registration, the fallback polyfill, and this documentation.',
       placement: 'top'
     });
   }

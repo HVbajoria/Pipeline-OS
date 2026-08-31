@@ -251,6 +251,9 @@ describe('PipelineOS HTTP/API boundary', () => {
       }
     });
     httpApp = httpApi.app;
+    httpApp.get('/__webmcp-html-test', (_request, response) => {
+      response.type('html').send('<!doctype html><html></html>');
+    });
     httpServer = createServer(httpApp);
     await new Promise<void>((resolve) => {
       httpServer.listen(0, '127.0.0.1', resolve);
@@ -264,6 +267,18 @@ describe('PipelineOS HTTP/API boundary', () => {
     await new Promise<void>((resolve, reject) => {
       httpServer.close((error) => (error ? reject(error) : resolve()));
     });
+  });
+
+  it('applies WebMCP eligibility headers to API and downstream HTML responses', async () => {
+    const apiResponse = await jsonRequest('GET', '/api/state');
+    expect(apiResponse.headers['origin-agent-cluster']).toBe('?1');
+    expect(apiResponse.headers['permissions-policy']).toBe('tools=(self)');
+
+    const htmlResponse = await jsonRequest('GET', '/__webmcp-html-test');
+    expect(htmlResponse.status).toBe(200);
+    expect(htmlResponse.headers['origin-agent-cluster']).toBe('?1');
+    expect(htmlResponse.headers['permissions-policy']).toBe('tools=(self)');
+    expect(htmlResponse.body).toContain('<!doctype html>');
   });
 
   it('dispatches canonical and compatibility requests through the same service and actor audit path', async () => {

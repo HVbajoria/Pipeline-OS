@@ -68,11 +68,11 @@ flowchart LR
 | `src/client/operationClient.ts` | Browser invocation boundary | Sends `{ input }`, attaches `x-actor-type`/`x-actor-id`, parses typed output or the same `PipelineError`, and refreshes `/api/state` after success or failure. |
 | `src/client/synchronization.ts` | Initial hydration and cross-tab/view sync | Hydrates once, subscribes to `/api/events`, coalesces revisions, prevents stale SSE responses from regressing the store, and stops cleanly on unmount. |
 | `src/lib/store.ts` | Client projection | Stores typed arrays for all domain collections, catalogs, activity, revision, current role, and reset/hydration actions. Components never mutate domain arrays optimistically. |
-| `src/lib/webmcp.ts` | WebMCP adapter | Registers exactly the shared 19 descriptors and routes every execution through `OperationClient`; it supports native, polyfill, and development registry targets. |
+| `src/lib/webmcp.ts` | WebMCP adapter | Registers exactly the shared 20 descriptors and routes every execution through `OperationClient`; it supports native, polyfill, and development registry targets. |
 | `src/App.tsx` | Shell and role projections | Keeps navigation, role views, persisted activity feed, documentation, and thin event handlers together without owning server state. |
 | `src/components/AppTour.tsx` | Reusable guided tour | Controlled React Joyride wrapper with stable shell targets, progress, keyboard/focus support, and an optional Documentation registry step. |
 
-## The 19 canonical operations
+## The 20 canonical operations
 
 The operation registry in `src/shared/operations.ts` is the single source for names, descriptions, input schemas, output schemas, implementation keys, and read-only annotations. The same descriptors are used by server validation, the Documentation view, and WebMCP registration. There is no separate `schedule_interview` operation: scheduling is represented by the availability, proposal, and booking operations below.
 
@@ -129,7 +129,7 @@ The operation registry in `src/shared/operations.ts` is the single source for na
 The Recruiter Dashboard is the operational control surface. It can:
 
 1. Create requisitions with requirements and a structured compensation band.
-2. Search/rank candidates and open a complete profile/application history.
+2. Search public GitHub prospects from the **Source candidates** form, with an external profile link and consent boundary; use the canonical `search_candidates` operation separately when searching PipelineOS Candidate_Record data.
 3. Screen an application and inspect its persisted score and rationale.
 4. Check common interviewer availability, propose slots, and book from the Kanban card.
 5. Load panel feedback summaries after scorecards are submitted.
@@ -171,7 +171,7 @@ The seeded path is ready to replay after **Reset DB (Demo)**:
 9. Initiate the background check, select valid plans, generate the checklist, and read status (`initiate_background_check`, `enroll_benefits`, `generate_onboarding_checklist`, `get_onboarding_status`).
 10. Switch among all views: the Kanban, candidate portal, hiring-manager records, Documentation registry, and Live Activity Feed should all reflect the same persisted snapshot.
 
-The lifecycle guard also supports recruiter-authorized pre-offer rejection edges from `applied`, `screened`, or `interviewing` to terminal `rejected`. There is no separate rejection operation in the exact 19-operation registry; the guard is the single authority for service handlers that need that transition. `offer_declined`, `rejected`, and `onboarding` are terminal application states.
+The lifecycle guard also supports recruiter-authorized pre-offer rejection edges from `applied`, `screened`, or `interviewing` to terminal `rejected`. There is no separate rejection operation in the exact 20-operation registry; the guard is the single authority for service handlers that need that transition. `offer_declined`, `rejected`, and `onboarding` are terminal application states.
 
 ## Canonical lifecycle, validation, rollback, and synchronization
 
@@ -269,7 +269,7 @@ The startup lifecycle is also guarded for React StrictMode. `ApplicationBootstra
 
 ### Native and fallback registration
 
-`registerAllTools()` iterates the exact operation registry and registers 19 descriptors once per application bootstrap:
+`registerAllTools()` iterates the exact operation registry and registers 20 descriptors once per application bootstrap:
 
 1. If `document.modelContext.registerTool` exists, PipelineOS passes `{ name, description, inputSchema, execute, annotations }` to the native model-context runtime.
 2. If only the repository's development `navigator.modelContext.registerTool` shape exists, the adapter translates `inputSchema` to `schema` and `execute` to `handler`.
@@ -371,6 +371,33 @@ Before using or extending an adapter, verify the source terms, licensing, rate l
 
 The existing importer boundary can still persist normalized listings to an explicitly supplied `PublicJobListingStore` for an authorized import workflow. Malformed records are rejected with field paths and actionable errors; the live coordinator instead keeps its external-feed cache separate from the recruiting repository. `createSyntheticCandidates()` in `src/server/imports/syntheticCandidates.ts` returns a fresh deterministic fixture set marked `synthetic: true` and `dataOrigin: "synthetic"`, using reserved `.example.test` email addresses.
 
+## Public GitHub developer-prospect search
+
+The Recruiter Dashboard's existing **Source candidates** form is the user-facing entry point for an explicit, on-demand **Search** of public GitHub prospects. It is a small public-profile sourcing catalog, not a candidate database and not an applicant-record importer; there is no second GitHub search panel. The form appends comma-separated skills to the GitHub text query, while its experience-level selector is retained for continuity and clearly marked as unsupported by GitHub rather than sent as a false API filter. Results do not add prospects to `SharedStateRepository`, `CandidateRecord`, `ApplicationRecord`, the Pipeline Kanban, or any of the exact 19 WebMCP operations. A person becomes a PipelineOS candidate only after they apply or otherwise provide consent.
+
+The form calls the server-only route below.
+
+```http
+GET /api/prospects/github?query=backend%20engineer&language=TypeScript&location=New%20York
+Accept: application/json
+x-actor-type: human_ui
+x-actor-id: sarah-recruiter
+```
+
+`query` is required and is limited to 100 characters. `language` and `location` are optional and limited to 60 characters each; control characters, repeated/unknown query parameters, and malformed values are rejected with a structured `400 VALIDATION_ERROR`. The server builds a safe GitHub users-search expression and returns at most 10 prospects by default (the configurable maximum is capped at 25). The response contains `prospects`, the exact GitHub `query` expression, normalized `filters`, `source: "github"`, `fetchedAt`, cache metadata (`hit`, `coalesced`, age, TTL, and expiry), and API/profile attribution. Agent actors and non-recruiter demo actors receive a structured `403 FORBIDDEN_ERROR`.
+
+Each prospect is an allowlisted public result with `source: "github"`, `sourceUrl`/`profileUrl`, `username`/`login`, avatar URL, public profile type, GitHub search score, the query used, and fetch time. `dataOrigin` is `public_github` and `consentStatus` is `not_provided`. Location, bio, and public repository count are optional and are only retained when supplied by the official API response. PipelineOS never copies email addresses, phone numbers, private repositories, or other contact data. The UI only provides an external GitHub profile link and explains the opt-in boundary: a person is not a PipelineOS candidate until they apply or otherwise provide consent. There is no **Import to candidate** action, auto-message, auto-apply, or automated hiring decision.
+
+The adapter uses only the official GitHub REST API, specifically `GET https://api.github.com/search/users`, with a descriptive `User-Agent` and `Accept: application/vnd.github+json`. An optional `GITHUB_TOKEN` may be configured in the server process environment for rate-limit headroom; it is never sent to the browser, included in a URL/response, logged, or committed. GitHub rate-limit responses are returned as `429 RATE_LIMITED_ERROR`; other non-2xx, malformed JSON, and malformed payload responses are isolated as structured upstream errors. Searches are cached for five minutes by normalized query/language/location, duplicate in-flight requests are coalesced, upstream errors are not cached, and pagination/broad crawling is intentionally not implemented. This is cached on-demand search, not real-time data.
+
+Official references:
+
+- [GitHub REST search users](https://docs.github.com/en/rest/search/search)
+- [GitHub REST rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
+- [GitHub user endpoints](https://docs.github.com/en/rest/users/users)
+
+Greenhouse Harvest or Lever candidate data is outside this public-profile flow and would require employer authorization, an approved integration, and a separate candidate-data privacy/retention policy. Content was rephrased for compliance with licensing restrictions.
+
 ## Local setup
 
 ### Prerequisites
@@ -386,7 +413,7 @@ npm run dev
 
 Open <http://localhost:3000>. The development server is `tsx server.ts`; Vite supplies the SPA middleware and Express supplies `/api/*`.
 
-The provided `.env.example` documents `GEMINI_API_KEY` and `APP_URL` values used by the surrounding AI Studio/hosting environment. The current canonical FAQ and recruiting operations are deterministic and do not call Gemini, so those values are not required for local PipelineOS behavior. The server's process-level environment switch is `NODE_ENV`: production serves the built `dist` directory, while non-production runs Vite middleware.
+The provided `.env.example` documents `GEMINI_API_KEY` and `APP_URL` values used by the surrounding AI Studio/hosting environment. The current canonical FAQ and recruiting operations are deterministic and do not call Gemini, so those values are not required for local PipelineOS behavior. For recruiter-only GitHub prospect search, optionally set `GITHUB_TOKEN` in the **server** environment; never put it in browser code or a committed file. `GITHUB_PROSPECT_MAX_RESULTS` defaults to `10` and may be set from `1` through `25`; `GITHUB_PROSPECT_CACHE_TTL_MS` defaults to `300000` (five minutes). The process reads these values when composing the server, but no GitHub request is made until a recruiter explicitly submits a search. The server's process-level environment switch is `NODE_ENV`: production serves the built `dist` directory, while non-production runs Vite middleware.
 
 ### Configuration and programmatic composition
 
@@ -447,6 +474,8 @@ Inspect `/api/events` in the browser Network panel. The SSE payload intentionall
 
 In a development browser, inspect `window.__webmcp_tools` and confirm it contains the 19 canonical names. A host that supplies native `document.modelContext` or the repository's `navigator.modelContext` polyfill takes precedence over that development registry. The application does not install a runtime WebMCP package itself.
 
+For native eligibility, open the app as a top-level page rather than inside an iframe or embedded preview. `http://localhost:3000` can be a trusted local origin in Chrome; `http://0.0.0.0:3000`, arbitrary LAN IPs, and non-HTTPS remote URLs are not trusted local origins for this purpose, so remote use requires HTTPS. If Chrome's WebMCP testing implementation is gated, enable [`chrome://flags/#enable-webmcp-testing`](chrome://flags/#enable-webmcp-testing) and restart the browser. PipelineOS sends `Origin-Agent-Cluster: ?1` and `Permissions-Policy: tools=(self)`, but code response headers cannot turn an insecure URL into a secure context.
+
 ### The tour does not show a Documentation registry step
 
 That step is intentionally conditional. Switch to Documentation and click Start Tour again; the registry target is mounted only in that role view. The shared shell steps remain available from every view. Use keyboard Tab/Escape or the visible Close/Skip controls to leave the tour.
@@ -466,10 +495,12 @@ pipelineos/
 ├── src/
 │   ├── App.tsx                         # shell, role views, feed, Documentation view
 │   ├── components/AppTour.tsx          # controlled accessible guided tour
+│   ├── components/GitHubProspectsPanel.tsx # recruiter-only public prospect panel
 │   ├── client/
 │   │   ├── actorContext.ts              # role-to-actor and agent context
 │   │   ├── bootstrap.ts                 # StrictMode-safe startup lifecycle
 │   │   ├── operationClient.ts           # canonical browser invocation boundary
+│   │   ├── githubProspectsClient.ts      # recruiter-only GitHub catalog client
 │   │   └── synchronization.ts            # /api/state hydration and SSE revisions
 │   ├── lib/
 │   │   ├── store.ts                     # typed Zustand projection
@@ -479,6 +510,7 @@ pipelineos/
 │   │   ├── api.ts                       # Express routes and serialization
 │   │   ├── events.ts                    # revision-only SSE publisher
 │   │   ├── imports/                     # compliant public-listing importer and synthetic fixtures
+│   │   ├── prospects/                   # isolated public GitHub prospect adapter/cache
 │   │   ├── operationService.ts           # validation, dispatch, audit, transaction
 │   │   ├── operations/                  # one handler per canonical operation
 │   │   ├── repository.ts                # atomic map-backed repository
@@ -487,7 +519,7 @@ pipelineos/
 │       ├── domain/                      # lifecycle, scoring, FAQ, scheduling, etc.
 │       ├── errors.ts                    # structured PipelineError contract
 │       ├── models.ts                    # domain/state types
-│       ├── operations.ts                # exact 19-operation registry and schemas
+│       ├── operations.ts                # exact 20-operation registry and schemas
 │       └── validators.ts                # shared field/input/output validation
 ├── test/                                # unit, property, HTTP, and integration tests
 ├── server.ts                            # Express/Vite composition root

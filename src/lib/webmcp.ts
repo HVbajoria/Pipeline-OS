@@ -61,6 +61,18 @@ declare global {
 /** The exact descriptors made available to the documentation view and tests. */
 export const registeredTools: WebMcpRegisteredTool[] = [];
 
+export interface WebMcpRegistrationDiagnostic {
+  toolName: OperationName;
+  error: unknown;
+}
+
+const webMcpRegistrationDiagnostics: WebMcpRegistrationDiagnostic[] = [];
+
+/** Rejections reported asynchronously by the native registration surface. */
+export function getWebMcpRegistrationDiagnostics(): readonly WebMcpRegistrationDiagnostic[] {
+  return webMcpRegistrationDiagnostics.map((diagnostic) => ({ ...diagnostic }));
+}
+
 function browserWindow(): Window | undefined {
   return typeof globalThis.window === 'object' ? globalThis.window : undefined;
 }
@@ -70,6 +82,19 @@ function registerInDevelopmentRegistry(tool: WebMcpRegisteredTool): void {
   if (!target) return;
   target.__webmcp_tools ??= {};
   target.__webmcp_tools[tool.name] = tool;
+}
+
+function observeNativeRegistration(
+  toolName: OperationName,
+  result: unknown
+): void {
+  // Promise.resolve also handles PromiseLike implementations while keeping
+  // register() synchronous for existing adapters and tests. Every rejection
+  // receives a handler, preventing an unhandled rejection from the browser's
+  // native registration surface.
+  void Promise.resolve(result).catch((error: unknown) => {
+    webMcpRegistrationDiagnostics.push({ toolName, error });
+  });
 }
 
 /**
@@ -84,13 +109,14 @@ export class WebMcpRuntimeAdapter {
         ? globalThis.document.modelContext
         : undefined;
     if (nativeContext?.registerTool) {
-      nativeContext.registerTool({
+      const registrationResult = nativeContext.registerTool({
         name: tool.name,
         description: tool.description,
         inputSchema: tool.inputSchema,
         execute: tool.execute,
         annotations: tool.annotations
       });
+      observeNativeRegistration(tool.name, registrationResult);
       return 'native';
     }
 
@@ -172,6 +198,7 @@ export function registerAllTools(
 
 export function resetWebMcpRegistry(): void {
   registeredTools.length = 0;
+  webMcpRegistrationDiagnostics.length = 0;
   const target = browserWindow();
   if (target) delete target.__webmcp_tools;
 }

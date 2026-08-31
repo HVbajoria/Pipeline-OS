@@ -40,6 +40,7 @@ import {
 const EXPECTED_OPERATION_NAMES = [
   'create_job_requisition',
   'search_candidates',
+  'search_public_candidates',
   'get_candidate_profile',
   'submit_application',
   'screen_candidate',
@@ -62,6 +63,7 @@ const EXPECTED_OPERATION_NAMES = [
 const EXPECTED_INPUT_REQUIRED_FIELDS = {
   create_job_requisition: ['title', 'department', 'requirements', 'compBand'],
   search_candidates: [],
+  search_public_candidates: ['query'],
   get_candidate_profile: ['candidateId'],
   submit_application: ['candidateId', 'jobId', 'resumeText'],
   screen_candidate: ['applicationId'],
@@ -90,6 +92,15 @@ const EXPECTED_INPUT_REQUIRED_FIELDS = {
 const EXPECTED_OUTPUT_REQUIRED_FIELDS = {
   create_job_requisition: ['jobId'],
   search_candidates: ['results'],
+  search_public_candidates: [
+    'prospects',
+    'query',
+    'filters',
+    'source',
+    'fetchedAt',
+    'cache',
+    'attribution'
+  ],
   get_candidate_profile: [
     'id',
     'name',
@@ -285,7 +296,7 @@ describe('PipelineOS foundational contracts', () => {
     expect(candidate!.resumeTextHistory).toEqual([]);
   });
 
-  it('registers exactly the canonical 19 operations and their required schemas', () => {
+  it('registers exactly the canonical 20 operations and their required schemas', () => {
     expect(OPERATION_NAMES).toEqual(EXPECTED_OPERATION_NAMES);
     expect(Object.keys(OPERATION_REGISTRY)).toEqual(EXPECTED_OPERATION_NAMES);
     expect(getOperationNames()).toEqual(EXPECTED_OPERATION_NAMES);

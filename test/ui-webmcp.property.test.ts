@@ -566,7 +566,7 @@ describe('Property 4: UI/WebMCP operation equivalence', () => {
     );
   });
 
-  it('registers exactly the canonical 19-operation WebMCP registry', () => {
+  it('registers exactly the canonical 20-operation WebMCP registry', () => {
     resetWebMcpRegistry();
     const adapter = new CapturingAdapter();
     registerAllTools({ adapter, force: true });

@@ -22,6 +22,21 @@ import type {
   TaskCompletion,
   Timestamp
 } from './models';
+import type {
+  GitHubProspect,
+  GitHubProspectAttribution,
+  GitHubProspectCacheMetadata,
+  GitHubProspectSearchInput,
+  GitHubProspectSearchResult,
+  NormalizedGitHubProspectSearchInput
+} from './publicProspects';
+import {
+  GITHUB_PROSPECT_DATA_ORIGIN,
+  GITHUB_PROSPECT_FILTER_MAX_LENGTH,
+  GITHUB_PROSPECT_QUERY_MAX_LENGTH,
+  GITHUB_PROSPECT_SAFE_TEXT_PATTERN,
+  GITHUB_PROSPECT_SOURCE
+} from './publicProspects';
 import {
   BACKGROUND_CHECK_STATUSES,
   EXPERIENCE_LEVELS,
@@ -80,6 +95,7 @@ export type JSONSchema = JsonSchema;
 export const OPERATION_NAMES = [
   'create_job_requisition',
   'search_candidates',
+  'search_public_candidates',
   'get_candidate_profile',
   'submit_application',
   'screen_candidate',
@@ -105,6 +121,7 @@ export type OperationName = (typeof OPERATION_NAMES)[number];
 export const OPERATION_IMPLEMENTATION_KEYS = {
   create_job_requisition: 'createJobRequisition',
   search_candidates: 'searchCandidates',
+  search_public_candidates: 'searchPublicCandidates',
   get_candidate_profile: 'getCandidateProfile',
   submit_application: 'submitApplication',
   screen_candidate: 'screenCandidate',
@@ -158,6 +175,9 @@ export interface CandidateSearchResult {
 export interface SearchCandidatesOutput {
   results: CandidateSearchResult[];
 }
+
+export type SearchPublicCandidatesInput = GitHubProspectSearchInput;
+export type SearchPublicCandidatesOutput = GitHubProspectSearchResult;
 
 export interface GetCandidateProfileInput {
   candidateId: string;
@@ -354,6 +374,7 @@ export interface GetOnboardingStatusOutput {
 export interface OperationInputMap {
   create_job_requisition: CreateJobRequisitionInput;
   search_candidates: SearchCandidatesInput;
+  search_public_candidates: SearchPublicCandidatesInput;
   get_candidate_profile: GetCandidateProfileInput;
   submit_application: SubmitApplicationInput;
   screen_candidate: ScreenCandidateInput;
@@ -377,6 +398,7 @@ export interface OperationInputMap {
 export interface OperationOutputMap {
   create_job_requisition: CreateJobRequisitionOutput;
   search_candidates: SearchCandidatesOutput;
+  search_public_candidates: SearchPublicCandidatesOutput;
   get_candidate_profile: GetCandidateProfileOutput;
   submit_application: SubmitApplicationOutput;
   screen_candidate: ScreenCandidateOutput;
@@ -485,6 +507,127 @@ const candidateRecordSchema: JsonSchema = {
     'skills',
     'experienceYears',
     'resumeTextHistory'
+  ],
+  additionalProperties: false
+};
+
+const publicProspectTextSchema: JsonSchema = {
+  type: 'string',
+  pattern: GITHUB_PROSPECT_SAFE_TEXT_PATTERN
+};
+
+const publicProspectInputTextSchema: JsonSchema = {
+  ...publicProspectTextSchema,
+  maxLength: GITHUB_PROSPECT_FILTER_MAX_LENGTH
+};
+
+const publicProspectQuerySchema: JsonSchema = {
+  ...publicProspectInputTextSchema,
+  minLength: 1,
+  maxLength: GITHUB_PROSPECT_QUERY_MAX_LENGTH
+};
+
+const normalizedPublicProspectFiltersSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    query: publicProspectQuerySchema,
+    language: publicProspectInputTextSchema,
+    location: publicProspectInputTextSchema
+  },
+  required: ['query'],
+  additionalProperties: false
+};
+
+const publicProspectSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    source: { type: 'string', const: GITHUB_PROSPECT_SOURCE },
+    sourceUrl: { type: 'string', minLength: 1 },
+    profileUrl: { type: 'string', minLength: 1 },
+    username: requiredStringSchema,
+    login: requiredStringSchema,
+    avatarUrl: { type: 'string', minLength: 1 },
+    profileType: requiredStringSchema,
+    searchScore: { type: 'number' },
+    query: publicProspectTextSchema,
+    fetchedAt: timestampSchema,
+    dataOrigin: { type: 'string', const: GITHUB_PROSPECT_DATA_ORIGIN },
+    consentStatus: { type: 'string', const: 'not_provided' },
+    location: publicProspectTextSchema,
+    bio: publicProspectTextSchema,
+    publicRepos: { type: 'integer', minimum: 0 }
+  },
+  required: [
+    'source',
+    'sourceUrl',
+    'profileUrl',
+    'username',
+    'login',
+    'profileType',
+    'searchScore',
+    'query',
+    'fetchedAt',
+    'dataOrigin',
+    'consentStatus'
+  ],
+  additionalProperties: false
+};
+
+const publicProspectCacheSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    hit: { type: 'boolean' },
+    coalesced: { type: 'boolean' },
+    ageMs: { type: 'number', minimum: 0 },
+    ttlMs: { type: 'number', minimum: 0 },
+    fetchedAt: timestampSchema,
+    expiresAt: timestampSchema
+  },
+  required: ['hit', 'coalesced', 'ageMs', 'ttlMs', 'fetchedAt', 'expiresAt'],
+  additionalProperties: false
+};
+
+const publicProspectAttributionSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    source: { type: 'string', const: GITHUB_PROSPECT_SOURCE },
+    apiUrl: { type: 'string', minLength: 1 },
+    searchApiDocsUrl: { type: 'string', minLength: 1 },
+    rateLimitsDocsUrl: { type: 'string', minLength: 1 },
+    userApiDocsUrl: { type: 'string', minLength: 1 }
+  },
+  required: [
+    'source',
+    'apiUrl',
+    'searchApiDocsUrl',
+    'rateLimitsDocsUrl',
+    'userApiDocsUrl'
+  ],
+  additionalProperties: false
+};
+
+const publicProspectSearchResultSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    prospects: {
+      type: 'array',
+      items: publicProspectSchema
+    },
+    query: publicProspectTextSchema,
+    filters: normalizedPublicProspectFiltersSchema,
+    source: { type: 'string', const: GITHUB_PROSPECT_SOURCE },
+    fetchedAt: timestampSchema,
+    cache: publicProspectCacheSchema,
+    attribution: publicProspectAttributionSchema
+  },
+  required: [
+    'prospects',
+    'query',
+    'filters',
+    'source',
+    'fetchedAt',
+    'cache',
+    'attribution'
   ],
   additionalProperties: false
 };
@@ -663,6 +806,23 @@ export const OPERATION_REGISTRY = {
       required: ['results'],
       additionalProperties: false
     }
+  ),
+
+  search_public_candidates: operationDescriptor(
+    'search_public_candidates',
+    'Search allowlisted public GitHub profiles without creating candidate records.',
+    true,
+    {
+      type: 'object',
+      properties: {
+        query: publicProspectQuerySchema,
+        language: publicProspectInputTextSchema,
+        location: publicProspectInputTextSchema
+      },
+      required: ['query'],
+      additionalProperties: false
+    },
+    publicProspectSearchResultSchema
   ),
 
   get_candidate_profile: operationDescriptor(
@@ -1214,6 +1374,12 @@ export type {
   CompensationBand,
   DateRange,
   ExperienceLevel,
+  GitHubProspect,
+  GitHubProspectAttribution,
+  GitHubProspectCacheMetadata,
+  GitHubProspectSearchInput,
+  GitHubProspectSearchResult,
+  NormalizedGitHubProspectSearchInput,
   JobRequisition,
   OfferDecision,
   OfferResponseStatus,

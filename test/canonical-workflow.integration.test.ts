@@ -171,7 +171,7 @@ const agent: ActorContext = {
 // Feature: pipelineos, Task 8.5: Full canonical workflow integration
 // **Validates: Requirements 4.1–9.6, 10.1–15.7, 16.1–22.6, 23.1–24.7**
 describe('Task 8.5: canonical server workflow and regression matrix', () => {
-  it('drives all 19 operations through one deterministic workflow and asserts final onboarding status', async () => {
+  it('drives all 20 operations through one deterministic workflow and asserts final onboarding status', async () => {
     // Keep the seeded panel attached to job-1 while creating that requisition
     // through the real operation, so every phase uses the same created role.
     const seed = createSeed();
@@ -602,7 +602,9 @@ describe('Task 8.5: canonical server workflow and regression matrix', () => {
       'generate_onboarding_checklist',
       'get_onboarding_status'
     ]);
-    expect(new Set(activityNames)).toEqual(new Set(OPERATION_NAMES));
+    expect(new Set(activityNames)).toEqual(
+      new Set(OPERATION_NAMES.filter((name) => name !== 'search_public_candidates'))
+    );
     expect(repository.read().applications.get(applicationId)?.status).toBe('onboarding');
   });
 

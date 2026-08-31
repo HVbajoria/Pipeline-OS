@@ -37,6 +37,6 @@ describe('application tour configuration', () => {
       target: TOUR_TARGETS.documentationRegistry,
       title: 'The registry is the source of tool documentation'
     });
-    expect(String(registryStep?.content)).toContain('19 descriptors');
+    expect(String(registryStep?.content)).toContain('20 descriptors');
   });
 });

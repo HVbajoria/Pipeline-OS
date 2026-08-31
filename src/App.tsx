@@ -1,7 +1,12 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Activity, Book, Briefcase, CheckCircle, FileText, HelpCircle, User, Users, X } from 'lucide-react';
 import { AppTour } from './components/AppTour';
 import LivePublicJobsPanel from './components/LivePublicJobsPanel';
+import {
+  GitHubProspectsConsentNotice,
+  GitHubProspectsResults
+} from './components/GitHubProspectsPanel';
+import { buildRecruiterGitHubSearchInput } from './client/recruiterSourceSearch';
 import { useStore } from './lib/store';
 import { projectActivityFeed, projectKanban } from './lib/viewModels';
 import { actorContextForRole } from './client/actorContext';
@@ -9,7 +14,6 @@ import { operationClient } from './client/operationClient';
 import { PipelineError } from './shared/errors';
 import { calculateOnboardingStatus } from './shared/domain/onboarding';
 import type {
-  CandidateSearchResult,
   CheckInterviewerAvailabilityOutput,
   GetCandidateProfileOutput,
   GetInterviewKitOutput,
@@ -17,6 +21,9 @@ import type {
   GetPanelFeedbackSummaryOutput,
   ProposeInterviewSlotsOutput
 } from './shared/operations';
+import type {
+  GitHubProspectSearchResult
+} from './shared/publicProspects';
 import type { ApplicationRecord, PlanSelections } from './shared/models';
 import { OPERATION_NAMES, OPERATION_REGISTRY } from './shared/operations';
 
@@ -131,7 +138,7 @@ const DocumentationView = () => {
     <div data-tour="role-view" className="p-8 max-w-5xl mx-auto space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-gray-900 mb-2">WebMCP Tools Documentation</h1>
-        <p className="text-gray-500">The documentation is rendered from the same 19 descriptors registered with WebMCP.</p>
+        <p className="text-gray-500">The documentation is rendered from the same 20 descriptors registered with WebMCP.</p>
       </div>
       <div data-tour="documentation-registry" className="space-y-6">
         {descriptors.map((tool) => (
@@ -172,7 +179,10 @@ const FeedbackSummaryPanel = ({ summary }: { summary: GetPanelFeedbackSummaryOut
 
 const RecruiterView = () => {
   const { jobs, applications, candidates, interviews, offers, onboardingTasks, backgroundChecks, benefitsEnrollments, panels, catalogs } = useStore();
-  const [searchResults, setSearchResults] = useState<CandidateSearchResult[]>([]);
+  const [githubProspectResult, setGitHubProspectResult] = useState<GitHubProspectSearchResult | null>(null);
+  const [githubProspectLoading, setGitHubProspectLoading] = useState(false);
+  const [githubProspectError, setGitHubProspectError] = useState<unknown>(null);
+  const githubSearchController = useRef<AbortController | null>(null);
   const [profile, setProfile] = useState<GetCandidateProfileOutput | null>(null);
   const [feedbackSummaries, setFeedbackSummaries] = useState<Record<string, GetPanelFeedbackSummaryOutput>>({});
   const [commonSlotsByApplication, setCommonSlotsByApplication] = useState<Record<string, CheckInterviewerAvailabilityOutput['commonFreeSlots']>>({});
@@ -182,6 +192,8 @@ const RecruiterView = () => {
   const [onboardingStatus, setOnboardingStatus] = useState<Record<string, GetOnboardingStatusOutput>>({});
   const [error, setError] = useOperationError();
   const actor = actorContextForRole('recruiter');
+
+  useEffect(() => () => githubSearchController.current?.abort(), []);
 
   const run = async (operation: () => Promise<unknown>) => {
     try {
@@ -214,14 +226,41 @@ const RecruiterView = () => {
   const handleSearch = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    const rawLevel = String(data.get('experienceLevel') ?? '');
-    const experienceLevel = rawLevel === 'junior' || rawLevel === 'mid' || rawLevel === 'senior' ? rawLevel : undefined;
-    const result = await run(() => operationClient.invoke('search_candidates', {
-      query: String(data.get('query') ?? '') || undefined,
-      skills: String(data.get('skills') ?? '').split(',').map((value) => value.trim()).filter(Boolean),
-      experienceLevel
-    }, actor));
-    if (result) setSearchResults((result as { results: CandidateSearchResult[] }).results);
+    githubSearchController.current?.abort();
+    const controller = new AbortController();
+    githubSearchController.current = controller;
+    setGitHubProspectLoading(true);
+    setGitHubProspectError(null);
+    setGitHubProspectResult(null);
+
+    let input;
+    try {
+      input = buildRecruiterGitHubSearchInput({
+        query: data.get('query'),
+        language: data.get('language'),
+        location: data.get('location')
+      });
+    } catch (caught) {
+      if (!controller.signal.aborted) {
+        setGitHubProspectError(caught);
+        setGitHubProspectLoading(false);
+      }
+      return;
+    }
+
+    try {
+      const next = await operationClient.invoke(
+        'search_public_candidates',
+        input,
+        actor,
+        controller.signal
+      );
+      if (!controller.signal.aborted) setGitHubProspectResult(next);
+    } catch (caught) {
+      if (!controller.signal.aborted) setGitHubProspectError(caught);
+    } finally {
+      if (!controller.signal.aborted) setGitHubProspectLoading(false);
+    }
   };
 
   const loadFeedbackSummary = async (applicationId: string) => {
@@ -330,13 +369,25 @@ const RecruiterView = () => {
           <div className="flex gap-2"><input name="min" type="number" placeholder="Min" required className="w-full border rounded p-2 text-sm" /><input name="max" type="number" placeholder="Max" required className="w-full border rounded p-2 text-sm" /><input name="currency" defaultValue="USD" required className="w-24 border rounded p-2 text-sm" /></div>
           <button className="w-full bg-blue-600 text-white rounded p-2 text-sm font-medium">Create requisition</button>
         </form>
-        <form onSubmit={handleSearch} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-3">
+        <form data-source-candidates-form onSubmit={handleSearch} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-3">
           <h2 className="text-lg font-semibold border-b pb-2">Source candidates</h2>
-          <input name="query" placeholder="Query" className="w-full border rounded p-2 text-sm" />
-          <input name="skills" placeholder="Skills (comma separated)" className="w-full border rounded p-2 text-sm" />
-          <select name="experienceLevel" className="w-full border rounded p-2 text-sm bg-white"><option value="">Any experience</option><option value="junior">Junior</option><option value="mid">Mid</option><option value="senior">Senior</option></select>
-          <button className="w-full bg-indigo-600 text-white rounded p-2 text-sm font-medium">Search</button>
-          <div className="space-y-2">{searchResults.map((result) => <div key={result.candidateId} className="border rounded p-3 text-sm"><div className="flex justify-between"><strong>{result.name}</strong><span>{result.matchScore}</span></div><p className="text-gray-600">{result.rationale}</p><button type="button" onClick={() => handleProfile(result.candidateId)} className="text-blue-600 text-xs">Open profile</button></div>)}</div>
+          <p className="text-sm text-gray-500">Search public GitHub prospects. Results stay outside the PipelineOS candidate and application records until a person applies or otherwise provides consent.</p>
+          <label className="block text-sm text-gray-700">
+            Query
+            <input name="query" placeholder="e.g. backend engineer" required maxLength={100} className="mt-1 w-full border rounded p-2 text-sm" />
+          </label>
+          <label className="block text-sm text-gray-700">
+            Language <span className="text-gray-400">(optional)</span>
+            <input name="language" placeholder="TypeScript" maxLength={60} className="mt-1 w-full border rounded p-2 text-sm" />
+          </label>
+          <label className="block text-sm text-gray-700">
+            Location <span className="text-gray-400">(optional)</span>
+            <input name="location" placeholder="Berlin" maxLength={60} className="mt-1 w-full border rounded p-2 text-sm" />
+          </label>
+          <p className="text-xs text-gray-500">Public sourcing supports only query, language, and location filters. Internal persisted-record matching remains available through the separate <code>search_candidates</code> operation.</p>
+          <button type="submit" disabled={githubProspectLoading} className="w-full bg-indigo-600 text-white rounded p-2 text-sm font-medium disabled:opacity-50">Search</button>
+          <GitHubProspectsResults result={githubProspectResult} loading={githubProspectLoading} requestError={githubProspectError} />
+          <GitHubProspectsConsentNotice />
         </form>
       </div>
 

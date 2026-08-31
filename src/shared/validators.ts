@@ -21,6 +21,9 @@ import {
   type OperationOutputMap
 } from './operations';
 import {
+  normalizeGitHubProspectSearchInput
+} from './publicProspects';
+import {
   PipelineError,
   type PipelineErrorDetails,
   type PipelineValidationIssue,
@@ -410,17 +413,21 @@ export function validateOperationInput<N extends OperationName>(
   }
 
   const descriptor = getOperationDescriptor(name);
-  const issues = validateJsonSchema(input, descriptor.inputSchema);
+  const normalizedInput =
+    name === 'search_public_candidates'
+      ? normalizeGitHubProspectSearchInput(input)
+      : input;
+  const issues = validateJsonSchema(normalizedInput, descriptor.inputSchema);
   if (issues.length > 0) {
     throwValidationIssues(name, issues);
   }
 
-  const semanticIssues = semanticInputIssues(name, input);
+  const semanticIssues = semanticInputIssues(name, normalizedInput);
   if (semanticIssues.length > 0) {
     throwValidationIssues(name, semanticIssues);
   }
 
-  return input as OperationInputMap[N];
+  return normalizedInput as OperationInputMap[N];
 }
 
 /** Validate an operation name before looking it up in the registry. */

@@ -49,17 +49,22 @@ export async function createServerApp(
     repository: operationService.repository,
     operationService,
     eventPublisher,
-    publicJobs
+    publicJobs,
+    githubProspects: options.githubProspects,
+    githubProspectAuthorization: options.githubProspectAuthorization,
+    githubProspectsOptions: options.githubProspectsOptions
   };
 
   // An injected service may still receive test/extension handlers, while the
-  // normal composition path above has already registered all 19 handlers.
+  // normal composition path above has already registered all 20 handlers.
   if (options.operationService && options.handlers) {
     apiOptions.handlers = options.handlers;
   }
 
   const api = createPipelineApi(apiOptions);
 
+  // The API factory installs WebMCP eligibility headers before this branch,
+  // so both Vite HTML and production static HTML inherit the same policy.
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -80,7 +85,7 @@ export async function createServerApp(
 export async function startServer(options: ServerOptions = {}) {
   const { app, api } = await createServerApp(options);
   const port = options.port ?? 3000;
-  const host = options.host ?? '0.0.0.0';
+  const host = options.host ?? 'localhost';
   const server = app.listen(port, host, () => {
     console.log(`Server running on http://${host}:${port}`);
   });

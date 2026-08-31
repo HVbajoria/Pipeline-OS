@@ -11,10 +11,7 @@ import type {
   SharedStateProjectionWithCatalogs,
   SharedStateWithCatalogs
 } from '../shared/models';
-import {
-  PipelineError,
-  ValidationError
-} from '../shared/errors';
+import { PipelineError, ValidationError } from '../shared/errors';
 import {
   type OperationName,
   OPERATION_NAMES
@@ -33,10 +30,19 @@ import {
 import { resolveActorContext } from './actorContext';
 import { defaultOperationHandlers } from './operations';
 import {
+  createSearchPublicCandidatesHandler,
+  type SearchPublicCandidatesAuthorizationOptions
+} from './operations/searchPublicCandidates';
+import {
   PublicJobsCoordinator,
   type PublicJobsCoordinatorOptions,
   type PublicJobsService
 } from './imports/publicJobs';
+import {
+  GitHubProspectService,
+  type GitHubProspectServiceApi,
+  type GitHubProspectServiceOptions
+} from './prospects';
 
 export interface PipelineApiOptions extends OperationServiceOptions {
   operationService?: OperationService;
@@ -44,6 +50,11 @@ export interface PipelineApiOptions extends OperationServiceOptions {
   /** Inject a live public-job coordinator for tests or embedding hosts. */
   publicJobs?: PublicJobsService;
   publicJobsOptions?: PublicJobsCoordinatorOptions;
+  /** Inject the server-only GitHub public-prospect service for tests/hosts. */
+  githubProspects?: GitHubProspectServiceApi;
+  /** Optional authorization overrides for public-prospect operation actors. */
+  githubProspectAuthorization?: SearchPublicCandidatesAuthorizationOptions;
+  githubProspectsOptions?: GitHubProspectServiceOptions;
 }
 
 export interface PipelineApi {
@@ -52,6 +63,7 @@ export interface PipelineApi {
   operationService: OperationService;
   events: StateEventPublisher;
   publicJobs: PublicJobsService;
+  githubProspects: GitHubProspectServiceApi;
 }
 
 function mapValues<T>(collection: Map<string, T>): T[] {
@@ -107,6 +119,40 @@ function requestBodyInput(request: Request): unknown {
 
 function bodyOrEmpty(request: Request): Record<string, unknown> {
   return isPlainObject(request.body) ? request.body : {};
+}
+
+const GITHUB_PROSPECT_QUERY_FIELDS = new Set(['query', 'language', 'location']);
+
+/**
+ * Translate the compatibility query into operation input without invoking the
+ * GitHub service here. Allowed query values retain their original types so the
+ * shared operation validator can audit malformed/repeated values as 400s.
+ * An unsupported-field marker deliberately remains invalid input, preserving
+ * the operation audit path without forwarding that field to GitHub.
+ */
+function githubProspectSearchInput(request: Request): Record<string, unknown> {
+  const input: Record<string, unknown> = {};
+  for (const field of GITHUB_PROSPECT_QUERY_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(request.query, field)) {
+      input[field] = request.query[field];
+    }
+  }
+
+  const unknownField = Object.keys(request.query).find(
+    (field) => !GITHUB_PROSPECT_QUERY_FIELDS.has(field)
+  );
+  if (unknownField !== undefined) {
+    input.__unsupportedQueryParameter = unknownField;
+  }
+
+  return input;
+}
+
+function environmentPositiveInteger(name: string): number | undefined {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim().length === 0) return undefined;
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 function legacyOfferDecision(value: unknown): unknown {
@@ -280,18 +326,48 @@ function installCompatibilityRoutes(
 
 /** Create the API plus its dependencies for tests or a composition root. */
 export function createPipelineApi(options: PipelineApiOptions = {}): PipelineApi {
+  // Construct/inject the server-only service before composing the operation
+  // dispatcher. The token is read only at this server boundary and never
+  // becomes part of operation input, output, activity, or serialized state.
+  const githubProspects =
+    options.githubProspects ??
+    new GitHubProspectService({
+      ...options.githubProspectsOptions,
+      token:
+        options.githubProspectsOptions?.token ?? process.env.GITHUB_TOKEN,
+      maxResults:
+        options.githubProspectsOptions?.maxResults ??
+        environmentPositiveInteger('GITHUB_PROSPECT_MAX_RESULTS'),
+      cacheTtlMs:
+        options.githubProspectsOptions?.cacheTtlMs ??
+        environmentPositiveInteger('GITHUB_PROSPECT_CACHE_TTL_MS')
+    });
+  const publicProspectHandler = createSearchPublicCandidatesHandler(
+    githubProspects,
+    options.githubProspectAuthorization
+  );
   const operationService =
     options.operationService ??
     new OperationService({
       repository: options.repository ?? new SharedStateRepository(),
       handlers: {
         ...defaultOperationHandlers,
+        search_public_candidates: publicProspectHandler,
         ...(options.handlers ?? {})
       }
     });
 
-  if (options.operationService && options.handlers) {
-    operationService.registerHandlers(options.handlers);
+  if (options.operationService) {
+    operationService.registerHandlers(options.handlers ?? {});
+    // An externally composed service may have been created with the static
+    // default map, so bind the injected dependency unless the caller supplied
+    // an explicit public-prospect handler override.
+    if (options.handlers?.search_public_candidates === undefined) {
+      operationService.registerHandler(
+        'search_public_candidates',
+        publicProspectHandler
+      );
+    }
   }
 
   const repository = operationService.repository;
@@ -300,6 +376,15 @@ export function createPipelineApi(options: PipelineApiOptions = {}): PipelineApi
   const publicJobs =
     options.publicJobs ?? new PublicJobsCoordinator(options.publicJobsOptions);
   const app = express();
+
+  // Install eligibility headers before API routes and before server.ts mounts
+  // Vite or production static middleware, so every HTML response inherits the
+  // same explicit, same-origin WebMCP policy.
+  app.use((_request: Request, response: Response, next: NextFunction) => {
+    response.setHeader('Origin-Agent-Cluster', '?1');
+    response.setHeader('Permissions-Policy', 'tools=(self)');
+    next();
+  });
 
   app.use(express.json());
 
@@ -335,6 +420,15 @@ export function createPipelineApi(options: PipelineApiOptions = {}): PipelineApi
       else sendError(response, error);
     }
   });
+
+  app.get(
+    '/api/prospects/github',
+    operationRoute(
+      operationService,
+      'search_public_candidates',
+      githubProspectSearchInput
+    )
+  );
 
   app.get('/api/state', (_request, response) => {
     response.json(serializeSharedState(repository.read()));
@@ -389,7 +483,14 @@ export function createPipelineApi(options: PipelineApiOptions = {}): PipelineApi
     sendError(response, error);
   });
 
-  return { app, repository, operationService, events, publicJobs };
+  return {
+    app,
+    repository,
+    operationService,
+    events,
+    publicJobs,
+    githubProspects
+  };
 }
 
 /** Return only the Express app for conventional HTTP test/server usage. */

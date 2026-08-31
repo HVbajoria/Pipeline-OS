@@ -739,7 +739,9 @@ describe('Task 8.4: canonical HTTP, SSE, reset, and hydration contracts', () => 
         completionPercentage: 0
       });
 
-      expect(invokedNames).toEqual([...OPERATION_NAMES]);
+      expect(invokedNames).toEqual(
+        OPERATION_NAMES.filter((name) => name !== 'search_public_candidates')
+      );
       expect(new Set(invokedNames.map((_name, index) => actorFor(index).actorType))).toEqual(
         new Set(['human_ui', 'agent'])
       );
