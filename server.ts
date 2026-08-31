@@ -86,7 +86,7 @@ export async function startServer(options: ServerOptions = {}) {
 
 function isEntrypoint(): boolean {
   const script = process.argv[1] ?? '';
-  return /(?:^|[\\/])server\\.(?:ts|js|cjs|mjs)$/.test(script);
+  return /(?:^|[\\/])server\.(?:ts|js|cjs|mjs)$/.test(script);
 }
 
 if (isEntrypoint()) {
