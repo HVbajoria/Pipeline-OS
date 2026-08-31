@@ -11,6 +11,7 @@ import { defaultOperationHandlers } from './src/server/operations';
 import { SharedStateRepository } from './src/server/repository';
 import { createSeed } from './src/server/seed';
 import { StateEventPublisher } from './src/server/events';
+import { PublicJobsCoordinator } from './src/server/imports/publicJobs';
 
 export interface ServerOptions extends PipelineApiOptions {
   port?: number;
@@ -42,10 +43,13 @@ export async function createServerApp(
     });
   const eventPublisher =
     options.eventPublisher ?? new StateEventPublisher(operationService.repository);
+  const publicJobs =
+    options.publicJobs ?? new PublicJobsCoordinator(options.publicJobsOptions);
   const apiOptions: PipelineApiOptions = {
     repository: operationService.repository,
     operationService,
-    eventPublisher
+    eventPublisher,
+    publicJobs
   };
 
   // An injected service may still receive test/extension handlers, while the

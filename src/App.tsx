@@ -1,6 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { Activity, Book, Briefcase, CheckCircle, FileText, HelpCircle, User, Users, X } from 'lucide-react';
 import { AppTour } from './components/AppTour';
+import LivePublicJobsPanel from './components/LivePublicJobsPanel';
 import { useStore } from './lib/store';
 import { projectActivityFeed, projectKanban } from './lib/viewModels';
 import { actorContextForRole } from './client/actorContext';
@@ -303,6 +304,7 @@ const RecruiterView = () => {
         <p className="text-gray-500">All cards, offers, interviews, and activity are projections of persisted Shared_State.</p>
       </div>
       {error && <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>}
+      <LivePublicJobsPanel />
 
       {profile && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

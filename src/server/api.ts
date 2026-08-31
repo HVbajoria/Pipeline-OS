@@ -32,10 +32,18 @@ import {
 } from './events';
 import { resolveActorContext } from './actorContext';
 import { defaultOperationHandlers } from './operations';
+import {
+  PublicJobsCoordinator,
+  type PublicJobsCoordinatorOptions,
+  type PublicJobsService
+} from './imports/publicJobs';
 
 export interface PipelineApiOptions extends OperationServiceOptions {
   operationService?: OperationService;
   eventPublisher?: StateEventPublisher;
+  /** Inject a live public-job coordinator for tests or embedding hosts. */
+  publicJobs?: PublicJobsService;
+  publicJobsOptions?: PublicJobsCoordinatorOptions;
 }
 
 export interface PipelineApi {
@@ -43,6 +51,7 @@ export interface PipelineApi {
   repository: SharedStateRepository;
   operationService: OperationService;
   events: StateEventPublisher;
+  publicJobs: PublicJobsService;
 }
 
 function mapValues<T>(collection: Map<string, T>): T[] {
@@ -288,6 +297,8 @@ export function createPipelineApi(options: PipelineApiOptions = {}): PipelineApi
   const repository = operationService.repository;
   const events =
     options.eventPublisher ?? new StateEventPublisher(repository);
+  const publicJobs =
+    options.publicJobs ?? new PublicJobsCoordinator(options.publicJobsOptions);
   const app = express();
 
   app.use(express.json());
@@ -312,6 +323,18 @@ export function createPipelineApi(options: PipelineApiOptions = {}): PipelineApi
   };
 
   app.post('/api/operations/:operationName', canonicalRoute);
+
+  app.get('/api/public-jobs', async (request, response, next) => {
+    try {
+      const result = await publicJobs.getListings({
+        refresh: request.query.refresh === 'true'
+      });
+      response.json(result);
+    } catch (error) {
+      if (response.headersSent) next(error);
+      else sendError(response, error);
+    }
+  });
 
   app.get('/api/state', (_request, response) => {
     response.json(serializeSharedState(repository.read()));
@@ -366,7 +389,7 @@ export function createPipelineApi(options: PipelineApiOptions = {}): PipelineApi
     sendError(response, error);
   });
 
-  return { app, repository, operationService, events };
+  return { app, repository, operationService, events, publicJobs };
 }
 
 /** Return only the Express app for conventional HTTP test/server usage. */
