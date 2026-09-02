@@ -11,10 +11,70 @@ export type PipelineErrorCode =
 
 export type PipelineErrorStatus = 400 | 403 | 404 | 409 | 429 | 500 | 502;
 
+export const PIPELINE_ERROR_DETAIL_REASONS = [
+  'stale_revision',
+  'entity_changed',
+  'approval_required',
+  'plan_expired',
+  'approval_rejected',
+  'idempotency_key_reuse',
+  'already_withdrawn',
+  'capability_denied',
+  'resource_scope',
+  'consent_required',
+  'approval_principal_required',
+  'not_authenticated',
+  'metadata_invalid',
+  'consent_invalid',
+  'unsupported_mode',
+  'input_invalid',
+  'approval_not_found',
+  'record_not_found',
+  'trace_not_found'
+] as const;
+export type PipelineErrorDetailReason =
+  (typeof PIPELINE_ERROR_DETAIL_REASONS)[number];
+export type PipelineErrorReason = PipelineErrorDetailReason;
+export type PipelineErrorDetailsReason = PipelineErrorDetailReason;
+
+export type PipelineConflictReason =
+  | 'stale_revision'
+  | 'entity_changed'
+  | 'approval_required'
+  | 'plan_expired'
+  | 'approval_rejected'
+  | 'idempotency_key_reuse'
+  | 'already_withdrawn';
+export type PipelineForbiddenReason =
+  | 'capability_denied'
+  | 'resource_scope'
+  | 'consent_required'
+  | 'approval_principal_required'
+  | 'not_authenticated';
+export type PipelineValidationReason =
+  | 'metadata_invalid'
+  | 'consent_invalid'
+  | 'unsupported_mode'
+  | 'input_invalid';
+export type PipelineNotFoundReason =
+  | 'approval_not_found'
+  | 'record_not_found'
+  | 'trace_not_found';
+
 export interface PipelineErrorDetails {
   field?: string;
   recordType?: string;
   recordId?: string;
+  reason?: PipelineErrorDetailReason;
+  expectedRevision?: number;
+  currentRevision?: number;
+  operationName?: string;
+  approvalId?: string;
+  originalActivityId?: string;
+  traceId?: string;
+  requiredCapability?: string;
+  resourceScope?: string;
+  retryAction?: string;
   /** Individual schema/field failures, retained for clients that need detail. */
   issues?: readonly PipelineValidationIssue[];
   [key: string]: unknown;

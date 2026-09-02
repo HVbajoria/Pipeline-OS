@@ -369,3 +369,28 @@ For every feature above, implement **one function** (e.g. `screenCandidate(appli
 2. Is called directly by the UI's onClick/onSubmit handler.
 
 Do not implement separate logic for "the tool version" and "the UI version" — that's the single biggest risk to WebMCP-leverage credibility in judging, since it's easy to fake a demo where the agent's tool calls don't actually touch real state.
+
+
+---
+
+## P14–P18 implementation addendum (September 2026)
+
+The implementation now completes the public-prospect, trace, coordination, capability, compatibility, and release-validation expansion described by the later phases of this document. The canonical registry contains **32 operations**: the original 20 workflow operations plus 12 additive read/plan/approval/provenance/coordination entries. `src/shared/operations.ts` is the only registry; `OperationService`, the HTTP route, `OperationClient`, Documentation, and every WebMCP adapter consume the same descriptors and schemas.
+
+### Public-prospect provenance and consent (P14)
+
+Public GitHub search is an on-demand, recruiter-authorized read path and remains non-importing by default. `import_public_prospect` requires an allowlisted source reference, explicit consent scope/reference, and human approval; it stores safe provenance, field origins, attribution, and retention metadata without copying private contact data or synthesizing a resume. `revoke_public_prospect_consent` is terminal and idempotent, blocks reuse without new consent/version, and preserves a safe withdrawal audit fact. `applyPublicProspectRetention(state, now)` is an explicit host-scheduled hook: expired records are marked safely, consent-created candidates are removed only when unlinked, and preexisting candidates are retained without raw evidence entering projections.
+
+### Correlated traces and actor-scoped synchronization (P15)
+
+Canonical envelope invocations persist one bounded root activity trace with safe child spans, correlation/trace/span links, phase, approval, replay, stale, and redaction markers. Legacy `(name, input, actor)` calls retain their six-field activity shape. `/api/state` is a trusted-principal/resource-scoped projection, `/api/events` carries only revision hints, and UI/WebMCP clients refresh authoritative state after success and failure while preventing stale responses from regressing the store. Trace and provenance payloads are redacted before state serialization.
+
+### Coordinated workflows and capability discovery (P16–P17)
+
+`coordinate_interview_workflow` and `coordinate_onboarding_workflow` reuse the low-level scheduling/lifecycle commands in one atomic service operation and expose deterministic proposal, booking, checklist, and task-status outcomes through the UI and WebMCP. `discover_capabilities` evaluates all 32 descriptors against the same policy used at execution time and returns safe actor/resource scope, execution mode, approval, and redaction metadata; it is informational and never replaces execute-time authorization. Candidate, hiring-manager, recruiter, and delegated-agent projections are resource-scoped, and unknown or forged principals fail closed.
+
+### Compatibility and release boundary (P18)
+
+Legacy operation overloads, canonical `{ input }` requests, low-level HTTP aliases, six-field legacy activity records, unscoped local `serializeSharedState(state)`, seeded demo data, and monotonic reset revisions remain supported. Canonical calls may carry correlation, idempotency, expected-revision, approval, and parent-span metadata through the body or equivalent headers. Responses expose safe correlation/trace/replay headers; validation, denial, conflict, stale, and upstream failures use the shared structured error envelope. Durable hosts must schedule retention cleanup and replace the in-memory repository/ledger and demo actor resolver with durable storage and a trusted identity provider before production use.
+
+The completed P14–P18 validation gate includes diagnostics/type checking, focused P12–P17 contract and role-matrix suites, lint, build, the full Vitest suite, compatibility-route checks, WebMCP registration checks, actor-scope/privacy review, and `git diff --check`. No commit or push is part of this implementation task.

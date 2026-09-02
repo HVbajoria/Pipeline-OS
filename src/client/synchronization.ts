@@ -1,6 +1,12 @@
 import { PipelineError, type PipelineErrorPayload } from '../shared/errors';
-import type { SharedStateProjectionWithCatalogs } from '../shared/models';
+import type { ActorContext, SharedStateProjectionWithCatalogs } from '../shared/models';
 import { useStore } from '../lib/store';
+import {
+  DEFAULT_HUMAN_CONTEXT,
+  resolveActorContextSource,
+  actorContextForRole,
+  type ActorContextSource
+} from './actorContext';
 
 export type StateFetch = (
   input: RequestInfo | URL,
@@ -10,6 +16,9 @@ export type StateFetch = (
 export interface SynchronizationOptions {
   baseUrl?: string;
   fetcher?: StateFetch;
+  actorContext?: ActorContextSource;
+  /** Additive singular alias for hosts that call the current actor `actor`. */
+  actor?: ActorContext;
   eventSourceFactory?: (url: string) => RevisionEventSource;
 }
 
@@ -34,6 +43,30 @@ function defaultFetcher(): StateFetch {
   return globalThis.fetch.bind(globalThis);
 }
 
+function resolveSynchronizationActor(options: Pick<SynchronizationOptions, 'actorContext' | 'actor'>): ActorContext {
+  return resolveActorContextSource(
+    options.actorContext ?? options.actor,
+    DEFAULT_HUMAN_CONTEXT
+  );
+}
+
+function actorHeaders(actor: ActorContext): Record<string, string> {
+  return {
+    accept: 'application/json',
+    'x-actor-type': actor.actorType,
+    'x-actor-id': actor.actorId
+  };
+}
+
+function actorEventUrl(baseUrl: string, actor: ActorContext): string {
+  const url = `${baseUrl ?? ''}/api/events`;
+  const query = new URLSearchParams({
+    actorType: actor.actorType,
+    actorId: actor.actorId
+  }).toString();
+  return `${url}${url.includes('?') ? '&' : '?'}${query}`;
+}
+
 async function parseBody(response: Response): Promise<unknown> {
   const text = await response.text();
   if (!text) return undefined;
@@ -45,12 +78,16 @@ async function parseBody(response: Response): Promise<unknown> {
 }
 
 async function fetchProjection(
-  options: Pick<SynchronizationOptions, 'baseUrl' | 'fetcher'> = {}
+  options: Pick<
+    SynchronizationOptions,
+    'baseUrl' | 'fetcher' | 'actorContext' | 'actor'
+  > = {}
 ): Promise<SharedStateProjectionWithCatalogs> {
   const fetcher = options.fetcher ?? defaultFetcher();
+  const actor = resolveSynchronizationActor(options);
   const response = await fetcher(`${options.baseUrl ?? ''}/api/state`, {
     method: 'GET',
-    headers: { accept: 'application/json' }
+    headers: actorHeaders(actor)
   });
   const body = await parseBody(response);
   if (!response.ok) {
@@ -62,12 +99,29 @@ async function fetchProjection(
   return body as SharedStateProjectionWithCatalogs;
 }
 
+/**
+ * Install an authoritative projection only when it is not older than the
+ * snapshot already visible to the current view. Equal revisions are accepted
+ * because an actor switch can legitimately return a different projection at
+ * the same repository revision.
+ */
+function hydrateIfCurrentOrNewer(
+  projection: SharedStateProjectionWithCatalogs
+): boolean {
+  if (projection.revision < useStore.getState().revision) return false;
+  useStore.getState().hydrate(projection);
+  return true;
+}
+
 /** Fetch and install one immutable server projection into Zustand. */
 export async function refreshSharedState(
-  options: Pick<SynchronizationOptions, 'baseUrl' | 'fetcher'> = {}
+  options: Pick<
+    SynchronizationOptions,
+    'baseUrl' | 'fetcher' | 'actorContext' | 'actor'
+  > = {}
 ): Promise<SharedStateProjectionWithCatalogs> {
   const projection = await fetchProjection(options);
-  useStore.getState().hydrate(projection);
+  hydrateIfCurrentOrNewer(projection);
   return projection;
 }
 
@@ -124,6 +178,10 @@ export class SynchronizationController {
         // the initial request was in flight. Do not hydrate or reconnect a
         // controller that is no longer the active lifecycle instance.
         if (this.isCurrent(generation)) {
+          // `start()` establishes a new view lifecycle. Its initial snapshot
+          // is authoritative even when a previous test/view left the shared
+          // client store at a higher revision; monotonic protection remains
+          // in force for subsequent refreshes and SSE drains.
           useStore.getState().hydrate(projection);
           this.connectEvents();
         }
@@ -141,6 +199,12 @@ export class SynchronizationController {
       });
     this.startPromise = startup;
     return startup;
+  }
+
+  async refreshForActorChange(): Promise<void> {
+    if (this.stopped) return;
+    this.stop();
+    await this.start().then(() => undefined);
   }
 
   async refresh(): Promise<SharedStateProjectionWithCatalogs> {
@@ -181,7 +245,8 @@ export class SynchronizationController {
         : undefined);
     if (!factory) return;
 
-    this.source = factory(`${this.options.baseUrl ?? ''}/api/events`);
+    const actor = resolveSynchronizationActor(this.options);
+    this.source = factory(actorEventUrl(this.options.baseUrl ?? '', actor));
     if (this.source.addEventListener) {
       this.source.addEventListener('state_changed', this.eventHandler);
     } else {
@@ -230,9 +295,7 @@ export class SynchronizationController {
 
       // A concurrent operation-client refresh can install a newer snapshot;
       // never let an older SSE-triggered response regress the store.
-      if (projection.revision >= useStore.getState().revision) {
-        useStore.getState().hydrate(projection);
-      }
+      hydrateIfCurrentOrNewer(projection);
 
       const observedRevision = useStore.getState().revision;
       if (this.queuedRevision <= observedRevision) {
@@ -252,4 +315,16 @@ export function createSynchronizationController(
   return new SynchronizationController(options);
 }
 
-export const synchronizationController = new SynchronizationController();
+export const synchronizationController = new SynchronizationController({
+  // Resolve the current UI role for every authoritative state refresh. The
+  // EventSource itself remains revision-only; actor identity is carried in
+  // the initial query while each `/api/state` request gets fresh headers.
+  actorContext: () => actorContextForRole(useStore.getState().currentRole)
+});
+
+// Role changes alter the actor-scoped projection. Invalidate any in-flight
+// response and reconnect the revision-only stream under the new actor.
+useStore.subscribe((state, previous) => {
+  if (state.currentRole === previous.currentRole) return;
+  void synchronizationController.refreshForActorChange().catch(() => undefined);
+});

@@ -62,6 +62,23 @@ export class ActorContextProvider {
   }
 }
 
+export type ActorContextSource =
+  | ActorContext
+  | (() => ActorContext)
+  | Pick<ActorContextProvider, 'getActorContext'>;
+
+export function resolveActorContextSource(
+  source: ActorContextSource | undefined,
+  fallback: ActorContext = DEFAULT_HUMAN_CONTEXT
+): ActorContext {
+  if (typeof source === 'function') return { ...source() };
+  if (source !== undefined && 'getActorContext' in source) {
+    return { ...source.getActorContext() };
+  }
+  if (source !== undefined) return { ...(source as ActorContext) };
+  return { ...fallback };
+}
+
 export function createActorContextProvider(
   initialRole: HumanRole = 'recruiter'
 ): ActorContextProvider {

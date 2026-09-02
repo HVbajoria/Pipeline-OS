@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type {
   ActivityLogEntry,
+  ApprovalCardSummary,
   ApplicationRecord,
   BackgroundCheckRecord,
   BenefitsEnrollmentRecord,
@@ -12,7 +13,8 @@ import type {
   OnboardingTaskRecord,
   ScorecardRecord,
   SharedCatalogProjection,
-  SharedStateProjectionWithCatalogs
+  SharedStateProjectionWithCatalogs,
+  SourcedProspectRecord
 } from '../shared/models';
 import {
   actorContextForRole,
@@ -34,6 +36,8 @@ export interface AppState {
   onboardingTasks: OnboardingTaskRecord[];
   backgroundChecks: BackgroundCheckRecord[];
   benefitsEnrollments: BenefitsEnrollmentRecord[];
+  approvalCards: ApprovalCardSummary[];
+  sourcedProspects: SourcedProspectRecord[];
   activityLog: ActivityLogEntry[];
   catalogs: SharedCatalogProjection;
 }
@@ -67,6 +71,8 @@ const INITIAL_STATE: AppState = {
   onboardingTasks: [],
   backgroundChecks: [],
   benefitsEnrollments: [],
+  approvalCards: [],
+  sourcedProspects: [],
   activityLog: [],
   catalogs: EMPTY_CATALOGS
 };
@@ -120,14 +126,21 @@ export const useStore = create<StoreState>((set, get) => ({
       onboardingTasks: next.onboardingTasks,
       backgroundChecks: next.backgroundChecks,
       benefitsEnrollments: next.benefitsEnrollments,
+      approvalCards: next.approvalCards ?? [],
+      sourcedProspects: next.sourcedProspects ?? [],
       activityLog: next.activityLog,
       catalogs: next.catalogs
     });
   },
   fetchState: async () => {
+    const actor = actorContextForRole(get().currentRole);
     const response = await fetch('/api/state', {
       method: 'GET',
-      headers: { accept: 'application/json' }
+      headers: {
+        accept: 'application/json',
+        'x-actor-type': actor.actorType,
+        'x-actor-id': actor.actorId
+      }
     });
     const body = await assertResponse(response);
     if (!body || typeof body !== 'object') {
@@ -136,9 +149,14 @@ export const useStore = create<StoreState>((set, get) => ({
     get().hydrate(body as SharedStateProjectionWithCatalogs);
   },
   resetState: async () => {
+    const actor = actorContextForRole(get().currentRole);
     const resetResponse = await fetch('/api/reset', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        'x-actor-type': actor.actorType,
+        'x-actor-id': actor.actorId
+      },
       body: '{}'
     });
     await assertResponse(resetResponse);
@@ -158,6 +176,8 @@ export const useStore = create<StoreState>((set, get) => ({
       onboardingTasks: state.onboardingTasks,
       backgroundChecks: state.backgroundChecks,
       benefitsEnrollments: state.benefitsEnrollments,
+      approvalCards: state.approvalCards,
+      sourcedProspects: state.sourcedProspects,
       activityLog: state.activityLog,
       catalogs: state.catalogs
     });

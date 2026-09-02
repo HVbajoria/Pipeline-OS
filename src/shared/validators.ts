@@ -9,14 +9,19 @@ import {
   type ActorContext,
   type CompensationBand,
   type DateRange,
+  INVOCATION_METADATA_LIMITS,
+  type InvocationMetadata,
   type Timestamp
 } from './models';
 import {
   getOperationDescriptor,
+  INVOCATION_METADATA_SCHEMA,
   isOperationName,
+  PLANABLE_OPERATION_NAMES,
   type JsonSchema,
   type JsonSchemaType,
   type OperationInputMap,
+  type OperationInvocation,
   type OperationName,
   type OperationOutputMap
 } from './operations';
@@ -240,6 +245,12 @@ export function validateJsonSchema(
         'maxItems'
       );
     }
+    if (schema.uniqueItems) {
+      const serializedItems = value.map((item) => JSON.stringify(item));
+      if (new Set(serializedItems).size !== serializedItems.length) {
+        addIssue(issues, path, 'must contain unique items', 'uniqueItems');
+      }
+    }
     if (schema.items !== undefined) {
       value.forEach((item, index) => {
         issues.push(
@@ -398,7 +409,84 @@ function semanticInputIssues(
     }
   }
 
+  if (name === 'plan_operation') {
+    const targetOperation = input.targetOperation;
+    if (
+      typeof targetOperation !== 'string' ||
+      !(PLANABLE_OPERATION_NAMES as readonly string[]).includes(targetOperation)
+    ) {
+      return [
+        {
+          path: 'input.targetOperation',
+          message: 'targetOperation must be a planable operation',
+          keyword: 'planable'
+        }
+      ];
+    }
+
+    const targetDescriptor = getOperationDescriptor(
+      targetOperation as OperationName
+    );
+    const nestedIssues = validateJsonSchema(
+      input.input,
+      targetDescriptor.inputSchema,
+      'input.input'
+    );
+    if (nestedIssues.length > 0) {
+      return nestedIssues;
+    }
+  }
+
   return [];
+}
+
+export function validateInvocationMetadata(
+  metadata: unknown
+): InvocationMetadata | undefined {
+  if (metadata === undefined) return undefined;
+
+  const issues = validateJsonSchema(
+    metadata,
+    INVOCATION_METADATA_SCHEMA,
+    'metadata'
+  );
+  if (issues.length > 0) {
+    throw new ValidationError('Invalid invocation metadata', detailsForIssues(issues));
+  }
+
+  return metadata as InvocationMetadata;
+}
+
+/** Validate the additive envelope while keeping metadata outside operation input. */
+export function validateOperationInvocation(
+  invocation: unknown
+): OperationInvocation {
+  if (!isPlainObject(invocation)) {
+    throw new ValidationError('Operation invocation must be an object', {
+      field: 'invocation'
+    });
+  }
+
+  const extraField = Object.keys(invocation).find(
+    (field) => !['name', 'input', 'actor', 'metadata'].includes(field)
+  );
+  if (extraField !== undefined) {
+    throw new ValidationError(`Unsupported invocation field: ${extraField}`, {
+      field: extraField
+    });
+  }
+
+  assertOperationName(invocation.name);
+  const actor = assertActorContext(invocation.actor);
+  const input = validateOperationInput(invocation.name, invocation.input);
+  const metadata = validateInvocationMetadata(invocation.metadata);
+
+  return {
+    name: invocation.name,
+    input,
+    actor,
+    ...(metadata === undefined ? {} : { metadata })
+  } as OperationInvocation;
 }
 
 /** Validate and return the typed input for any canonical operation. */

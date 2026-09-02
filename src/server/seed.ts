@@ -298,6 +298,8 @@ export function createSeedState(): SharedState {
     onboardingTasks: new Map(),
     backgroundChecks: new Map(),
     benefitsEnrollments: new Map(),
+    approvalCards: new Map(),
+    sourcedProspects: new Map(),
     activityLog: []
   };
 }

@@ -4,6 +4,9 @@
  * or other runtime-only values cross the JSON state boundary.
  */
 
+import type { SourcedProspectRecord } from './publicProspects';
+export type { SourcedProspectRecord };
+
 /** A JSON-safe timestamp serialized as an ISO 8601 string. */
 export type Timestamp = string;
 export type ISO8601Timestamp = Timestamp;
@@ -21,8 +24,32 @@ export type OnboardingTaskId = EntityId;
 export type BackgroundCheckId = EntityId;
 export type BenefitsEnrollmentId = EntityId;
 export type ActivityId = EntityId;
+export type ApprovalId = EntityId;
+export type CorrelationId = string;
+export type IdempotencyKey = string;
 export type RoleTemplateId = EntityId;
 export type InterviewerId = EntityId;
+export type SourcedProspectId = EntityId;
+export type SpanId = string;
+export type TraceId = string;
+
+/** IDs emitted by a plan are placeholders and never consume a commit ID. */
+export const GENERATED_ID_PLACEHOLDER_PREFIX = 'preview-';
+export type GeneratedIdPlaceholder = `${typeof GENERATED_ID_PLACEHOLDER_PREFIX}${string}`;
+
+export interface GeneratedIdReference {
+  value: string;
+  entityType: string;
+  placeholder: boolean;
+}
+
+/** Bounded transport metadata limits shared by clients and server validators. */
+export const INVOCATION_METADATA_LIMITS = {
+  correlationId: 128,
+  idempotencyKey: 256,
+  approvalId: 128,
+  parentSpanId: 128
+} as const;
 
 /** Recursive JSON types used by the persisted activity log. */
 export type JsonPrimitive = string | number | boolean | null;
@@ -91,6 +118,64 @@ export type BackgroundCheckStatus = (typeof BACKGROUND_CHECK_STATUSES)[number];
 
 export const ACTOR_TYPES = ['human_ui', 'agent'] as const;
 export type ActorType = (typeof ACTOR_TYPES)[number];
+
+export const OPERATION_EXECUTION_CLASSES = [
+  'read',
+  'plan',
+  'approval',
+  'commit'
+] as const;
+export type OperationExecutionClass =
+  (typeof OPERATION_EXECUTION_CLASSES)[number];
+export type ExecutionClass = OperationExecutionClass;
+
+export const APPROVAL_POLICIES = [
+  'none',
+  'agent',
+  'human',
+  'consent_and_human'
+] as const;
+export type ApprovalPolicy = (typeof APPROVAL_POLICIES)[number];
+
+export const APPROVAL_CARD_POLICIES = ['human', 'consent_and_human'] as const;
+export type ApprovalCardPolicy = (typeof APPROVAL_CARD_POLICIES)[number];
+
+export const APPROVAL_CARD_STATUSES = [
+  'pending',
+  'approved',
+  'rejected',
+  'expired',
+  'committed'
+] as const;
+export type ApprovalCardStatus = (typeof APPROVAL_CARD_STATUSES)[number];
+
+export const APPROVAL_RECORD_EFFECTS = ['create', 'update', 'withdraw'] as const;
+export type ApprovalRecordEffect = (typeof APPROVAL_RECORD_EFFECTS)[number];
+
+export const ACTIVITY_PHASES = [
+  'read',
+  'plan',
+  'approval',
+  'commit',
+  'replay'
+] as const;
+export type ActivityPhase = (typeof ACTIVITY_PHASES)[number];
+
+export const TRACE_SPAN_STATUSES = [
+  'started',
+  'completed',
+  'failed',
+  'skipped'
+] as const;
+export type TraceSpanStatus = (typeof TRACE_SPAN_STATUSES)[number];
+
+export interface InvocationMetadata {
+  correlationId?: CorrelationId;
+  idempotencyKey?: IdempotencyKey;
+  expectedRevision?: number;
+  approvalId?: ApprovalId;
+  parentSpanId?: SpanId;
+}
 
 export const OFFER_DECISIONS = ['accept', 'decline', 'counter'] as const;
 export type OfferDecision = (typeof OFFER_DECISIONS)[number];
@@ -264,6 +349,122 @@ export interface ActorContext {
   actorId: string;
 }
 
+export interface ApprovalAffectedRecord {
+  type: string;
+  id: EntityId | GeneratedIdPlaceholder;
+  effect: ApprovalRecordEffect;
+}
+
+/** Internal approval-card record. normalizedInput is never a public projection. */
+export interface ApprovalCardRecord {
+  id: ApprovalId;
+  targetOperation: string;
+  normalizedInput: JsonObject;
+  requestFingerprint: string;
+  requestedBy: ActorContext;
+  requestedAt: Timestamp;
+  baseRevision: number;
+  targetFingerprint: string;
+  affectedRecords: ApprovalAffectedRecord[];
+  proposedOutput: JsonObject;
+  changeSummary: string[];
+  warnings: string[];
+  /** Safe workflow blockers surfaced by the planned target, when any. */
+  blockers?: string[];
+  requiredCapability: string;
+  approvalPolicy: ApprovalCardPolicy;
+  /** Policy version captured at plan time for commit-time revalidation. */
+  policyVersion?: string;
+  status: ApprovalCardStatus;
+  approvalNote?: string;
+  rejectionNote?: string;
+  approvedBy?: ActorContext;
+  approvedAt?: Timestamp;
+  rejectedBy?: ActorContext;
+  rejectedAt?: Timestamp;
+  expiresAt: Timestamp;
+  correlationId: CorrelationId;
+  traceId: TraceId;
+  committedAt?: Timestamp;
+}
+
+/** Actor-scoped card view; protected normalized input and fingerprints are omitted. */
+export interface ApprovalCardSummary {
+  id: ApprovalId;
+  targetOperation: string;
+  requestedBy: ActorContext;
+  requestedAt: Timestamp;
+  baseRevision: number;
+  affectedRecords: ApprovalAffectedRecord[];
+  proposedOutput: JsonObject;
+  changeSummary: string[];
+  warnings: string[];
+  blockers?: string[];
+  requiredCapability: string;
+  approvalPolicy: ApprovalCardPolicy;
+  policyVersion?: string;
+  status: ApprovalCardStatus;
+  approvalNote?: string;
+  rejectionNote?: string;
+  approvedBy?: ActorContext;
+  approvedAt?: Timestamp;
+  rejectedBy?: ActorContext;
+  rejectedAt?: Timestamp;
+  expiresAt: Timestamp;
+  correlationId: CorrelationId;
+  traceId: TraceId;
+  committedAt?: Timestamp;
+  redactions?: string[];
+}
+
+export type ApprovalCard = ApprovalCardSummary;
+
+export interface TraceSpan {
+  spanId: SpanId;
+  parentSpanId?: SpanId;
+  name: string;
+  status: TraceSpanStatus;
+  startedAt: Timestamp;
+  completedAt?: Timestamp;
+  durationMs?: number;
+  summary?: JsonObject;
+}
+
+export interface ActivityTrace {
+  spans: TraceSpan[];
+}
+
+export const CAPABILITY_DENIAL_REASONS = [
+  'actor_not_authenticated',
+  'capability_denied',
+  'resource_scope',
+  'approval_only'
+] as const;
+export type CapabilityDenialReason = (typeof CAPABILITY_DENIAL_REASONS)[number];
+
+export interface CapabilityDescriptor {
+  name: string;
+  description: string;
+  visible: boolean;
+  allowed: boolean;
+  executionClass: OperationExecutionClass;
+  readOnlyHint: boolean;
+  planable: boolean;
+  requiresApproval: boolean;
+  requiredCapability: string;
+  resourceScope: string;
+  schemaRef?: string;
+  redactedFields: string[];
+  denialReason?: CapabilityDenialReason;
+}
+
+export interface CapabilityManifest {
+  manifestVersion: string;
+  policyVersion: string;
+  actor: ActorContext;
+  capabilities: CapabilityDescriptor[];
+}
+
 export interface ActivityLogEntry {
   id: ActivityId;
   toolName: string;
@@ -272,6 +473,16 @@ export interface ActivityLogEntry {
   input: JsonObject;
   output: JsonObject;
   timestamp: Timestamp;
+  correlationId?: CorrelationId;
+  traceId?: TraceId;
+  spanId?: SpanId;
+  parentSpanId?: SpanId;
+  phase?: ActivityPhase;
+  replayed?: boolean;
+  originalActivityId?: ActivityId;
+  approvalId?: ApprovalId;
+  redactions?: string[];
+  trace?: ActivityTrace;
 }
 
 /**
@@ -310,7 +521,9 @@ export type SerializedCatalogState = SharedCatalogProjection;
 
 /**
  * Mutable repository state. Domain collections are maps for keyed lookup and
- * activityLog preserves append order for the live activity feed.
+ * activityLog preserves append order for the live activity feed. Approval and
+ * sourced-prospect records live beside the legacy collections so a successful
+ * transaction can publish them atomically with its activity entry.
  */
 export interface SharedStateCollections {
   jobs: Map<JobId, JobRequisition>;
@@ -323,6 +536,8 @@ export interface SharedStateCollections {
   onboardingTasks: Map<OnboardingTaskId, OnboardingTaskRecord>;
   backgroundChecks: Map<BackgroundCheckId, BackgroundCheckRecord>;
   benefitsEnrollments: Map<BenefitsEnrollmentId, BenefitsEnrollmentRecord>;
+  approvalCards: Map<ApprovalId, ApprovalCardRecord>;
+  sourcedProspects: Map<SourcedProspectId, SourcedProspectRecord>;
   activityLog: ActivityLogEntry[];
 }
 
@@ -335,9 +550,29 @@ export interface SharedStateWithCatalogs extends SharedState {
 }
 
 /**
+ * Pre-P11.3 seed shapes accepted by the repository during migration. These
+ * aliases intentionally retain every legacy collection name while allowing
+ * normalizeSeed() to add the new maps with empty defaults.
+ */
+export type LegacySharedStateCollections = Omit<
+  SharedStateCollections,
+  'approvalCards' | 'sourcedProspects'
+>;
+
+export interface LegacySharedState extends LegacySharedStateCollections {
+  revision: number;
+}
+
+export interface LegacySharedStateWithCatalogs extends LegacySharedState {
+  catalogs: SharedCatalogs;
+}
+
+/**
  * JSON-safe state returned by the state endpoint and hydrated into Zustand.
  * Collection names intentionally match SharedState; map-backed collections
- * become stable arrays while activity entries retain append order.
+ * become stable arrays while activity entries retain append order. The two
+ * additive arrays are optional at this boundary so an older server payload can
+ * still hydrate a newer client; the store normalizes missing values to [].
  */
 export interface SharedStateProjection {
   revision: number;
@@ -351,6 +586,8 @@ export interface SharedStateProjection {
   onboardingTasks: OnboardingTaskRecord[];
   backgroundChecks: BackgroundCheckRecord[];
   benefitsEnrollments: BenefitsEnrollmentRecord[];
+  approvalCards?: ApprovalCardSummary[];
+  sourcedProspects?: SourcedProspectRecord[];
   activityLog: ActivityLogEntry[];
 }
 

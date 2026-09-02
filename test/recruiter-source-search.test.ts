@@ -103,19 +103,33 @@ describe('Recruiter Source candidates GitHub search', () => {
     expect(markup).not.toContain('Import to candidate');
   });
 
-  it('uses OperationClient for the canonical public operation without browser GitHub routes or unsupported fields', () => {
+  it('uses the canonical client and shared panel without browser GitHub routes or unsupported fields', () => {
     const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+    const panelSource = readFileSync(
+      new URL('../src/components/GitHubProspectsPanel.tsx', import.meta.url),
+      'utf8'
+    );
+    const clientSource = readFileSync(
+      new URL('../src/client/githubProspectsClient.ts', import.meta.url),
+      'utf8'
+    );
 
-    expect(appSource).toContain("'search_public_candidates'");
-    expect(appSource).toContain('operationClient.invoke');
+    expect(appSource).toContain('GitHubProspectsPanel');
     expect(appSource).not.toContain('githubProspectsClient');
     expect(appSource).not.toContain('/api/prospects/github');
-    expect(appSource).not.toContain('experienceLevel');
-    expect(appSource).not.toContain('maxResults');
+    expect(clientSource).toContain("'search_public_candidates'");
+    expect(clientSource).toContain('operationClient.invoke');
+    expect(panelSource).toContain("'plan_operation'");
+    expect(panelSource).toContain("'revoke_public_prospect_consent'");
+    expect(panelSource).not.toContain('experienceLevel');
+    expect(panelSource).not.toContain('maxResults');
   });
 
-  it('uses the existing Source candidates form as the GitHub entry point', () => {
+  it('uses GitHubProspectsPanel as the sole Source candidates entry point', () => {
     const markup = renderToStaticMarkup(createElement(App));
+    const panelMarkup = renderToStaticMarkup(
+      createElement('div', null, createElement(GitHubProspectsConsentNotice))
+    );
     const sourceStart = markup.indexOf('Source candidates');
     const sourceEnd = markup.indexOf('</form>', sourceStart);
     const sourceForm = markup.slice(sourceStart, sourceEnd);
@@ -127,9 +141,13 @@ describe('Recruiter Source candidates GitHub search', () => {
     expect(sourceForm).not.toContain('Experience level');
     expect(sourceForm).not.toContain('experienceLevel');
     expect(sourceForm).toContain('Search');
-    expect(sourceForm).toContain('provide consent');
-    expect(sourceForm).toContain('search_candidates');
-    expect(sourceForm).not.toContain('Open profile');
-    expect(sourceForm).not.toContain('Import to candidate');
+    expect(panelMarkup).toContain('Public visibility is not consent');
+    const panelSource = readFileSync(
+      new URL('../src/components/GitHubProspectsPanel.tsx', import.meta.url),
+      'utf8'
+    );
+    expect(panelSource).toContain('Record explicit consent before planning import');
+    expect(markup).not.toContain('Open profile');
+    expect(markup).not.toContain('Import to candidate');
   });
 });

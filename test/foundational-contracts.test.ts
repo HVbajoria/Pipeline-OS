@@ -60,6 +60,21 @@ const EXPECTED_OPERATION_NAMES = [
   'get_onboarding_status'
 ] as const;
 
+const ADDITIVE_OPERATION_NAMES = [
+  'plan_operation',
+  'get_approval_card',
+  'approve_operation_plan',
+  'reject_operation_plan',
+  'commit_operation_plan',
+  'compare_candidates',
+  'get_recruiting_workflow_status',
+  'import_public_prospect',
+  'revoke_public_prospect_consent',
+  'coordinate_interview_workflow',
+  'coordinate_onboarding_workflow',
+  'discover_capabilities'
+] as const;
+
 const EXPECTED_INPUT_REQUIRED_FIELDS = {
   create_job_requisition: ['title', 'department', 'requirements', 'compBand'],
   search_candidates: [],
@@ -87,7 +102,7 @@ const EXPECTED_INPUT_REQUIRED_FIELDS = {
   enroll_benefits: ['offerId', 'planSelections'],
   generate_onboarding_checklist: ['offerId'],
   get_onboarding_status: ['offerId']
-} as const satisfies Record<OperationName, readonly string[]>;
+} as const satisfies Record<(typeof EXPECTED_OPERATION_NAMES)[number], readonly string[]>;
 
 const EXPECTED_OUTPUT_REQUIRED_FIELDS = {
   create_job_requisition: ['jobId'],
@@ -141,7 +156,7 @@ const EXPECTED_OUTPUT_REQUIRED_FIELDS = {
     'taskCompletion',
     'completionPercentage'
   ]
-} as const satisfies Record<OperationName, readonly string[]>;
+} as const satisfies Record<(typeof EXPECTED_OPERATION_NAMES)[number], readonly string[]>;
 
 function expectKeys(value: object, expected: readonly string[]): void {
   expect(Object.keys(value).sort()).toEqual([...expected].sort());
@@ -296,10 +311,15 @@ describe('PipelineOS foundational contracts', () => {
     expect(candidate!.resumeTextHistory).toEqual([]);
   });
 
-  it('registers exactly the canonical 20 operations and their required schemas', () => {
-    expect(OPERATION_NAMES).toEqual(EXPECTED_OPERATION_NAMES);
-    expect(Object.keys(OPERATION_REGISTRY)).toEqual(EXPECTED_OPERATION_NAMES);
-    expect(getOperationNames()).toEqual(EXPECTED_OPERATION_NAMES);
+  it('registers the legacy twenty operations and additive shared contracts', () => {
+    expect(OPERATION_NAMES.slice(0, EXPECTED_OPERATION_NAMES.length)).toEqual(
+      EXPECTED_OPERATION_NAMES
+    );
+    expect(OPERATION_NAMES.slice(EXPECTED_OPERATION_NAMES.length)).toEqual(
+      ADDITIVE_OPERATION_NAMES
+    );
+    expect(Object.keys(OPERATION_REGISTRY)).toEqual([...OPERATION_NAMES]);
+    expect(getOperationNames()).toEqual([...OPERATION_NAMES]);
 
     for (const name of EXPECTED_OPERATION_NAMES) {
       const descriptor = OPERATION_REGISTRY[name];
@@ -310,7 +330,10 @@ describe('PipelineOS foundational contracts', () => {
       );
       expect(descriptor.readOnlyHint).toBe(descriptor.readOnly);
       expect(descriptor.annotations).toEqual({
-        readOnlyHint: descriptor.readOnly
+        readOnlyHint: descriptor.readOnly,
+        executionClass: descriptor.executionClass,
+        requiresApproval: descriptor.approvalPolicy !== 'none',
+        planable: descriptor.planable
       });
       expect(descriptor.inputSchema).toMatchObject({
         type: 'object',

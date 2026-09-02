@@ -13,7 +13,7 @@ PipelineOS demonstrates a shared human-and-agent recruiting system rather than a
 - **Deterministic behavior:** FAQ composition, candidate scoring, availability intersection, interview templates, onboarding dates, catalogs, reset data, and demo identifiers do not require an LLM, external API, or database.
 - **Observable synchronization:** successful and failed calls refresh state locally, while revision-only SSE events tell every open view to rehydrate from `/api/state`.
 
-The application is a demo/reference implementation, not an authentication system or a durable production database. Authentication and authorization are outside the current scope; actor headers are validated and recorded so that a real session resolver can replace the demo resolver later.
+The application is a deterministic demo/reference implementation with an in-memory repository, not a production identity provider or durable database. Non-production demo requests accept only known seeded identities; the production composition root requires a trusted host resolver, and arbitrary actor headers are never authentication. Every authorized state projection is actor/resource scoped.
 
 ## Product architecture
 
@@ -68,11 +68,11 @@ flowchart LR
 | `src/client/operationClient.ts` | Browser invocation boundary | Sends `{ input }`, attaches `x-actor-type`/`x-actor-id`, parses typed output or the same `PipelineError`, and refreshes `/api/state` after success or failure. |
 | `src/client/synchronization.ts` | Initial hydration and cross-tab/view sync | Hydrates once, subscribes to `/api/events`, coalesces revisions, prevents stale SSE responses from regressing the store, and stops cleanly on unmount. |
 | `src/lib/store.ts` | Client projection | Stores typed arrays for all domain collections, catalogs, activity, revision, current role, and reset/hydration actions. Components never mutate domain arrays optimistically. |
-| `src/lib/webmcp.ts` | WebMCP adapter | Registers exactly the shared 20 descriptors and routes every execution through `OperationClient`; it supports native, polyfill, and development registry targets. |
-| `src/App.tsx` | Shell and role projections | Keeps navigation, role views, persisted activity feed, documentation, and thin event handlers together without owning server state. |
+| `src/lib/webmcp.ts` | WebMCP adapter | Registers exactly the shared 32 descriptors and routes every execution through `OperationClient`; it supports native, polyfill, and development registry targets. Capability and approval metadata come from the same registry. |
+| `src/App.tsx` | Shell and role projections | Keeps navigation, role views, actor-aware documentation, persisted activity feed, and thin event handlers together without owning server state. |
 | `src/components/AppTour.tsx` | Reusable guided tour | Controlled React Joyride wrapper with stable shell targets, progress, keyboard/focus support, and an optional Documentation registry step. |
 
-## The 20 canonical operations
+## The 32 canonical operations
 
 The operation registry in `src/shared/operations.ts` is the single source for names, descriptions, input schemas, output schemas, implementation keys, and read-only annotations. The same descriptors are used by server validation, the Documentation view, and WebMCP registration. There is no separate `schedule_interview` operation: scheduling is represented by the availability, proposal, and booking operations below.
 
@@ -120,7 +120,25 @@ The operation registry in `src/shared/operations.ts` is the single source for na
 | `generate_onboarding_checklist` | Mutation | Requires an accepted offer, selects a role template, creates pending tasks from `Start_Date` offsets, rejects duplicate checklist generation, and transitions the application to `onboarding`; returns every task ID, name, and due date. |
 | `get_onboarding_status` | Read-only | Joins background check, benefits, and task state; returns background status, benefits enrollment, `{ done, total }`, and a zero-safe completion percentage. |
 
-**Read-only operations:** `search_candidates`, `get_candidate_profile`, `answer_candidate_faq`, `check_interviewer_availability`, `get_interview_kit`, `get_panel_feedback_summary`, and `get_onboarding_status`. They preserve all domain collections, but their invocation is still audited and advances the repository revision. The other twelve operations are mutations.
+### Plans, approvals, comparison, provenance, and coordination
+
+| Operation | Kind | Behavior and output |
+| --- | --- | --- |
+| `plan_operation` | Plan mutation | Validates one of the three planable targets (`import_public_prospect`, `coordinate_interview_workflow`, or `coordinate_onboarding_workflow`), runs it against an isolated preview, and persists a redacted approval card without changing target records. |
+| `get_approval_card` | Read-only | Returns the actor-scoped safe approval-card summary; normalized input, fingerprints, consent evidence, and other protected fields remain server-private. |
+| `approve_operation_plan` / `reject_operation_plan` | Approval mutation | Trusted human approval principals change only the card lifecycle. Agents cannot approve or reject, and the target business mutation is not applied until commit. |
+| `commit_operation_plan` | Commit mutation | Revalidates approval, policy version, consent, target fingerprint, and revision before applying the plan atomically; returns the target result wrapper. |
+| `compare_candidates` | Read-only | Produces bounded, deterministic requirement/skill/experience evidence and explainable ranking for a permitted job and candidate set. |
+| `get_recruiting_workflow_status` | Read-only | Returns one snapshot-consistent, actor-scoped view of application counts, blockers, next actions, and pending approvals. |
+| `import_public_prospect` | Consent-and-human commit | Imports only an allowlisted public result with explicit consent and human approval; persists provenance, field origins, attribution, and retention metadata without synthesizing private contact data. |
+| `revoke_public_prospect_consent` | Human-approved commit | Withdraws consent through an idempotent terminal operation and blocks future reuse of the withdrawn record. |
+| `coordinate_interview_workflow` | Human-approved commit | Coordinates deterministic slot proposals or booking through shared scheduling commands, with bounded child trace spans and stale/idempotent protection. |
+| `coordinate_onboarding_workflow` | Human-approved commit | Initializes an accepted-offer checklist or advances one task through `pending → in_progress → complete` using one atomic operation. |
+| `discover_capabilities` | Read-only | Returns the versioned, actor/resource-scoped capability manifest used for informational Documentation and host discovery; execute-time policy remains authoritative. |
+
+The registry currently contains 32 canonical operations: 12 read-only operations and 20 mutations/plans/approval commits. Six operations use human approval, `import_public_prospect` uses consent plus human approval, and the three coordinator/import targets are planable. All 32 descriptors are registered by WebMCP and use the same schemas, annotations, capability labels, and structured error contract.
+
+**Read-only operations:** `search_candidates`, `search_public_candidates`, `get_candidate_profile`, `answer_candidate_faq`, `check_interviewer_availability`, `get_interview_kit`, `get_panel_feedback_summary`, `get_onboarding_status`, `get_approval_card`, `compare_candidates`, `get_recruiting_workflow_status`, and `discover_capabilities`. They preserve business collections, but their invocation is still audited and advances the repository revision. The other twenty registry entries are plan, approval, or mutation paths.
 
 ## Role views and end-to-end flows
 
@@ -154,7 +172,7 @@ The Hiring Manager Portal can load the role-specific interview kit, inspect cand
 
 ### Documentation view
 
-Documentation renders the same 19 `OPERATION_REGISTRY` descriptors used at runtime. Each entry shows its mutation/read-only classification, description, input JSON Schema, output JSON Schema, and WebMCP annotations. This view is also the optional final spotlight in the guided tour when the Documentation role is active.
+Documentation renders the same 32 `OPERATION_REGISTRY` descriptors used at runtime. Each entry shows its mutation/read-only/plan/approval classification, description, input/output JSON Schema, WebMCP annotations, required capability, approval policy, and the current actor-scoped manifest decision. This view is also the optional final spotlight in the guided tour when the Documentation role is active.
 
 ### Canonical demo flow
 
@@ -171,7 +189,7 @@ The seeded path is ready to replay after **Reset DB (Demo)**:
 9. Initiate the background check, select valid plans, generate the checklist, and read status (`initiate_background_check`, `enroll_benefits`, `generate_onboarding_checklist`, `get_onboarding_status`).
 10. Switch among all views: the Kanban, candidate portal, hiring-manager records, Documentation registry, and Live Activity Feed should all reflect the same persisted snapshot.
 
-The lifecycle guard also supports recruiter-authorized pre-offer rejection edges from `applied`, `screened`, or `interviewing` to terminal `rejected`. There is no separate rejection operation in the exact 20-operation registry; the guard is the single authority for service handlers that need that transition. `offer_declined`, `rejected`, and `onboarding` are terminal application states.
+The lifecycle guard also supports recruiter-authorized pre-offer rejection edges from `applied`, `screened`, or `interviewing` to terminal `rejected`. There is no separate rejection operation in the exact 32-operation registry; the guard is the single authority for service handlers that need that transition. `offer_declined`, `rejected`, and `onboarding` are terminal application states.
 
 ## Canonical lifecycle, validation, rollback, and synchronization
 
@@ -210,7 +228,11 @@ For each invocation, `OperationService.invoke` performs the following sequence:
 6. For a read-only call, preserve all domain collections, append its activity entry in an audit-only commit, and advance one revision.
 7. For validation, not-found, conflict, or unexpected errors, discard the private mutation draft and append exactly one structured failure activity entry containing the original input. The failed domain records are not committed.
 
-Structured errors use the same `PipelineError` shape through HTTP, UI, and WebMCP. The normal codes are `VALIDATION_ERROR` (400), `NOT_FOUND_ERROR` (404), `CONFLICT_ERROR` (409), and `INTERNAL_ERROR` (500).
+The browser boundary may add `correlationId`, `idempotencyKey`, `expectedRevision`, `approvalId`, and `parentSpanId` in an optional `metadata` object or equivalent transport headers. Mutation clients generate an idempotency key when the options overload is used; legacy actor-overload calls remain valid. The server returns correlation, trace, parent-span, and replay headers without exposing raw keys. `OperationClient` refreshes the actor-scoped `/api/state` projection after success, replay, conflict, denial, or other failure; it never patches domain arrays optimistically.
+
+Plans, approvals, and coordinator mutations are audited with bounded traces. Coordinator internal spans intentionally remain direct children of the operation root so the existing trace-context API stays compatible; `handler:<operation>` is a separate root child. Approval and replay entries carry safe correlation/trace links, while redaction removes fingerprints, keys, raw consent evidence, tokens, and other private values before state serialization.
+
+Structured errors use the same `PipelineError` shape through HTTP, UI, and WebMCP. The normal codes are `VALIDATION_ERROR` (400), `NOT_FOUND_ERROR` (404), `CONFLICT_ERROR` (409), `FORBIDDEN_ERROR` (403), and `INTERNAL_ERROR` (500). Transport validation also accepts equivalent correlation/idempotency/If-Match/approval headers and rejects disagreement between headers and body metadata.
 
 ### State, activity, and reset semantics
 
@@ -231,7 +253,7 @@ The repository keeps maps internally for lookup and serializes stable arrays thr
 | Activity log | One audit entry per invocation, including reads and failures. |
 | Role templates and plan catalogs | Read-only deterministic support catalogs. |
 
-`read()` and `snapshot()` return deep clones, so callers cannot mutate server state out of band. `reset()` installs a fresh clone of the seed and publishes a repository change; it restores domain collections and clears the activity log, while the revision remains monotonic so SSE consumers can converge. The reset button then fetches `/api/state` and updates the client projection.
+`read()` and `snapshot()` return deep clones, so callers cannot mutate server state out of band. `reset()` installs a fresh clone of the seed, clears approval/provenance collections and the server-private in-memory idempotency ledger, and publishes a repository change; the revision remains monotonic so SSE consumers can converge. Missing optional `approvalCards` and `sourcedProspects` maps from legacy seeds are normalized to empty maps, and missing optional projection arrays hydrate as empty client arrays. Expired ledger entries are removed lazily on lookup; expired approval cards become terminal when accessed by approval/commit paths. Historical activity and safe withdrawal facts are retained rather than deleted. Hosts with durable storage must apply equivalent bounded TTL cleanup without removing required audit meaning. The reset button then fetches the current actor-scoped `/api/state` projection.
 
 ### Operation/synchronization sequence
 
@@ -269,13 +291,9 @@ The startup lifecycle is also guarded for React StrictMode. `ApplicationBootstra
 
 ### Native and fallback registration
 
-`registerAllTools()` iterates the exact operation registry and registers 20 descriptors once per application bootstrap:
+`registerAllTools()` iterates the exact 32-operation registry once per application bootstrap. Every tool carries the shared descriptor's `executionClass`, `readOnlyHint`, `requiresApproval`, required capability, and approval policy; native registration receives only the runtime fields accepted by the host, while the development registry retains the safe descriptive metadata. A denied tool remains registered when useful for discovery, but its `execute` callback reaches canonical `OperationService` authorization and returns the normal structured error.
 
-1. If `document.modelContext.registerTool` exists, PipelineOS passes `{ name, description, inputSchema, execute, annotations }` to the native model-context runtime.
-2. If only the repository's development `navigator.modelContext.registerTool` shape exists, the adapter translates `inputSchema` to `schema` and `execute` to `handler`.
-3. If neither runtime exists, the descriptor is retained in `window.__webmcp_tools` for local demos, documentation, and automated adapter tests.
-
-Every `execute` callback invokes the shared `OperationClient` with the default agent context `{ actorType: "agent", actorId: "agent-demo" }` unless a caller supplies another agent ID. Read-only descriptors expose `annotations.readOnlyHint: true`. The adapter does not maintain a second activity log, optimistic domain update, or WebMCP-only result.
+Runtime precedence remains native `document.modelContext.registerTool`, then the repository's `navigator.modelContext` polyfill shape, then `window.__webmcp_tools` for development/docs/tests. Every execute callback invokes the shared `OperationClient` with the default agent context `{ actorType: "agent", actorId: "agent-demo" }` unless a host supplies another actor. The adapter does not maintain a second activity log, optimistic domain update, or WebMCP-only result.
 
 ### Canonical HTTP invocation
 
@@ -325,7 +343,7 @@ The canonical server routes are:
 | Method and path | Behavior |
 | --- | --- |
 | `POST /api/operations/:operationName` | Dispatches `{ input }` through `OperationService` with actor headers. |
-| `GET /api/state` | Returns the complete JSON-safe state projection, catalogs, activity log, and revision. |
+| `GET /api/state` | Returns a JSON-safe actor/resource-scoped projection when a trusted principal is installed; the actor-less serializer overload remains for local compatibility callers. The projection includes safe collections, catalogs, activity, traces, and revision. |
 | `POST /api/reset` | Restores a fresh deterministic seed and returns `{ success, revision }`. |
 | `GET /api/events` | Opens an SSE stream whose `state_changed` frames contain only the latest revision. |
 
@@ -340,7 +358,7 @@ Legacy routes such as `/api/jobs`, `/api/candidates/search`, `/api/applications/
 | Hiring Manager UI | `human_ui` / `morgan-hiring-manager` |
 | WebMCP agent default | `agent` / `agent-demo` |
 
-Actor metadata is transport context, not operation input. The API resolves `x-actor-type` and `x-actor-id`, applies deterministic demo defaults when headers are absent, validates the result, and writes the actor into the activity entry.
+Actor metadata is transport context, not operation input. In non-production demo mode the resolver accepts only the known seeded role/agent identities; unknown headers become an unauthenticated principal. In production, the trusted host resolver supplies the principal and arbitrary `x-actor-*` headers are ignored for authentication. `/api/state`, `/api/events`, `/api/reset`, canonical operations, compatibility aliases, and WebMCP calls use the same policy boundary. Recruiter and delegated-agent projections can include assigned resources, hiring managers receive permitted candidate/interview data but not offers or onboarding by relationship inheritance, and candidates receive open jobs plus their own application/offer/benefits/onboarding/interview records. Hidden IDs and private trace/provenance fields are not serialized.
 
 ## Guided application tour
 
@@ -365,7 +383,7 @@ Each adapter validates its expected JSON shape, strips source HTML into plain te
 
 `GET /api/public-jobs` is a read-only API/UI catalog endpoint, not a WebMCP operation. The recruiter dashboard loads it only when the Recruiter view is used and provides an explicit `GET /api/public-jobs?refresh=true` refresh path. Results are cached independently per source for 15 minutes by default; a cache hit makes no network request, while an explicit refresh bypasses the cache. Requests are on-demand polling only: the selected feeds do not provide webhooks, so PipelineOS does not claim real-time push. Feed failures are isolated and returned as structured per-source errors; stale cached listings from a failed source can remain visible alongside successful results, and server startup does not depend on feed availability. Freshness depends on the upstream feeds and their publication timing.
 
-These listings are external public catalog data and are **not yet internal requisitions**. They are not written to `SharedStateRepository`, do not create applications, and do not add or remove any of the exact 19 canonical WebMCP operations. Candidate records and the candidate workflow remain synthetic/demo records until an authorized candidate source is provided. No candidate profiles, resumes, contact data, or applications are collected or sent through this catalog, and PipelineOS does not scrape arbitrary HTML pages or bypass source restrictions.
+These listings are external public catalog data and are **not yet internal requisitions**. They are not written to `SharedStateRepository`, do not create applications, and do not add or remove any of the exact 32 canonical WebMCP operations. Candidate records and the candidate workflow remain synthetic/demo records until an authorized candidate source is provided. No candidate profiles, resumes, contact data, or applications are collected or sent through this catalog, and PipelineOS does not scrape arbitrary HTML pages or bypass source restrictions.
 
 Before using or extending an adapter, verify the source terms, licensing, rate limits, attribution rules, retention policy, and applicable privacy obligations. The implementation uses only the two approved public JSON feeds, a descriptive `Accept`/`User-Agent`, sequential requests, and a conservative cache. Content was rephrased for compliance with licensing restrictions.
 
@@ -373,7 +391,7 @@ The existing importer boundary can still persist normalized listings to an expli
 
 ## Public GitHub developer-prospect search
 
-The Recruiter Dashboard's existing **Source candidates** form is the user-facing entry point for an explicit, on-demand **Search** of public GitHub prospects. It is a small public-profile sourcing catalog, not a candidate database and not an applicant-record importer; there is no second GitHub search panel. The form appends comma-separated skills to the GitHub text query, while its experience-level selector is retained for continuity and clearly marked as unsupported by GitHub rather than sent as a false API filter. Results do not add prospects to `SharedStateRepository`, `CandidateRecord`, `ApplicationRecord`, the Pipeline Kanban, or any of the exact 19 WebMCP operations. A person becomes a PipelineOS candidate only after they apply or otherwise provide consent.
+The Recruiter Dashboard's existing **Source candidates** form is the user-facing entry point for an explicit, on-demand **Search** of public GitHub prospects. It is a small public-profile sourcing catalog, not a candidate database and not an applicant-record importer; there is no second GitHub search panel. The form appends comma-separated skills to the GitHub text query, while its experience-level selector is retained for continuity and clearly marked as unsupported by GitHub rather than sent as a false API filter. Results do not add prospects to `SharedStateRepository`, `CandidateRecord`, `ApplicationRecord`, the Pipeline Kanban, or any of the exact 32 canonical WebMCP operations. A person becomes a PipelineOS candidate only after they apply or otherwise provide consent.
 
 The form calls the server-only route below.
 
@@ -398,6 +416,22 @@ Official references:
 
 Greenhouse Harvest or Lever candidate data is outside this public-profile flow and would require employer authorization, an approved integration, and a separate candidate-data privacy/retention policy. Content was rephrased for compliance with licensing restrictions.
 
+## Security, compatibility, and retention contract
+
+The current registry is the source of truth: 32 canonical operations (12 read-only and 20 mutation/plan/approval entries) are shared by validators, `OperationService`, `OperationClient`, Documentation, and all WebMCP adapters. The legacy `OperationClient.invoke(name, input, actor, signal)` overload, actor-less local `serializeSharedState(state)`, canonical `{ input }` bodies, low-level HTTP aliases, and legacy six-field activity entries remain supported. New trace/phase/correlation fields are additive and appear on canonical envelope activity only.
+
+Every operation crosses the same policy boundary. A trusted principal carries role, capability, tenant, and resource claims; presentation headers are only a known-identity demo convention outside production. Candidate state is self-scoped apart from open jobs, hiring-manager state is limited to assigned candidate/interview data, recruiter state follows assignment, and agents require explicit delegated capabilities/scopes. State, activity/trace, approval-card, prospect, reset, and SSE routes do not bypass this boundary. SSE contains only a revision hint; the actor then fetches a permitted state projection.
+
+Canonical mutation responses may include `X-Correlation-Id`, `X-Trace-Id`, `X-Span-Id`, `X-Parent-Span-Id`, `X-Idempotency-Replayed`, and `X-Idempotency-Original-Activity-Id`. The equivalent body metadata and `Idempotency-Key`, `If-Match`, `X-Expected-Revision`, and `X-Approval-Id` headers are validated for agreement. Replayed successes/errors are returned without rerunning a handler. Denials, stale revisions, approval conflicts, and validation failures use the same structured error envelope through HTTP, OperationClient, UI, and WebMCP.
+
+### Public-prospect retention scheduling
+
+`applyPublicProspectRetention(state, now)` is an explicit host-callable cleanup hook; the demo does not start a background timer. A durable host should schedule it from a worker or platform cron at least daily, passing an injected/current ISO timestamp and committing the returned state atomically. The hook marks elapsed records `expired`, records `expiredAt`, removes the consent-created candidate only when it has no application or other active sourced-prospect link, and unlinks but preserves preexisting candidates. Safe provenance and withdrawal/expiry audit meaning remain; raw consent evidence and private source payloads are never retained in projections. Idempotency ledger entries use a bounded TTL and are removed lazily on lookup or completely on demo reset. Approval cards become terminal when their expiry is observed by approval/commit paths.
+
+### Trace shape and privacy review
+
+A canonical operation has one persisted root activity trace. Handler and coordinator spans are bounded and redacted; coordinator internals deliberately remain direct children of the operation root, while `handler:<operation>` is another root child for compatibility with the existing trace context. Activity projection removes idempotency keys, fingerprints, raw consent evidence, tokens, authorization headers, and private upstream payloads. This is a demonstration boundary: production deployments must replace the in-memory repository/ledger and demo actor resolver with durable storage and a trusted identity provider.
+
 ## Local setup
 
 ### Prerequisites
@@ -417,7 +451,7 @@ The provided `.env.example` documents `GEMINI_API_KEY` and `APP_URL` values used
 
 ### Configuration and programmatic composition
 
-`server.ts` exports `createServerApp(options)` and `startServer(options)`. The default port is `3000` and the default host is `0.0.0.0`; callers embedding the composition root can provide `port`, `host`, repository, operation service, handlers, or event publisher. The demo does not read a `PORT` environment variable automatically.
+`server.ts` exports `createServerApp(options)` and `startServer(options)`. The default port is `3000` and the default host is `localhost`; callers embedding the composition root can provide `port`, `host`, repository, operation service, handlers, or event publisher. The demo does not read a `PORT` environment variable automatically.
 
 ### Non-watch validation
 
@@ -472,7 +506,7 @@ Inspect `/api/events` in the browser Network panel. The SSE payload intentionall
 
 ### WebMCP tools are not visible
 
-In a development browser, inspect `window.__webmcp_tools` and confirm it contains the 19 canonical names. A host that supplies native `document.modelContext` or the repository's `navigator.modelContext` polyfill takes precedence over that development registry. The application does not install a runtime WebMCP package itself.
+In a development browser, inspect `window.__webmcp_tools` and confirm it contains the 32 canonical names. A host that supplies native `document.modelContext` or the repository's `navigator.modelContext` polyfill takes precedence over that development registry. The registry is descriptive; runtime authorization still occurs in the canonical service.
 
 For native eligibility, open the app as a top-level page rather than inside an iframe or embedded preview. `http://localhost:3000` can be a trusted local origin in Chrome; `http://0.0.0.0:3000`, arbitrary LAN IPs, and non-HTTPS remote URLs are not trusted local origins for this purpose, so remote use requires HTTPS. If Chrome's WebMCP testing implementation is gated, enable [`chrome://flags/#enable-webmcp-testing`](chrome://flags/#enable-webmcp-testing) and restart the browser. PipelineOS sends `Origin-Agent-Cluster: ?1` and `Permissions-Policy: tools=(self)`, but code response headers cannot turn an insecure URL into a secure context.
 
@@ -519,7 +553,7 @@ pipelineos/
 │       ├── domain/                      # lifecycle, scoring, FAQ, scheduling, etc.
 │       ├── errors.ts                    # structured PipelineError contract
 │       ├── models.ts                    # domain/state types
-│       ├── operations.ts                # exact 20-operation registry and schemas
+│       ├── operations.ts                # exact 32-operation registry and schemas
 │       └── validators.ts                # shared field/input/output validation
 ├── test/                                # unit, property, HTTP, and integration tests
 ├── server.ts                            # Express/Vite composition root

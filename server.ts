@@ -7,15 +7,42 @@ import {
   type PipelineApiOptions
 } from './src/server/api';
 import { OperationService } from './src/server/operationService';
-import { defaultOperationHandlers } from './src/server/operations';
+import {
+  approvalOperationAdapters,
+  defaultOperationHandlers
+} from './src/server/operations';
 import { SharedStateRepository } from './src/server/repository';
 import { createSeed } from './src/server/seed';
 import { StateEventPublisher } from './src/server/events';
 import { PublicJobsCoordinator } from './src/server/imports/publicJobs';
+import {
+  createAuthorizationPolicy,
+  createTrustedActorResolver,
+  type AuthorizationEnvironment,
+  type AuthorizationPolicy,
+  type ProductionTrustedPrincipalResolver,
+  type TrustedActorResolver
+} from './src/server/authorization';
 
 export interface ServerOptions extends PipelineApiOptions {
   port?: number;
   host?: string;
+  /** Explicit environment override for demo/test versus production trust. */
+  environment?: AuthorizationEnvironment;
+  /** Injectable trusted identity seam used by an embedding host. */
+  trustedActorResolver?: TrustedActorResolver;
+  /** Injectable centralized policy; handlers never construct their own. */
+  authorizationPolicy?: AuthorizationPolicy;
+  /** Production host callback; arbitrary actor headers are never used here. */
+  resolveTrustedPrincipal?: ProductionTrustedPrincipalResolver;
+}
+
+export interface ServerComposition {
+  app: Express;
+  api: PipelineApi;
+  environment: AuthorizationEnvironment;
+  trustedActorResolver: TrustedActorResolver;
+  authorizationPolicy: AuthorizationPolicy;
 }
 
 /**
@@ -24,7 +51,22 @@ export interface ServerOptions extends PipelineApiOptions {
  */
 export async function createServerApp(
   options: ServerOptions = {}
-): Promise<{ app: Express; api: PipelineApi }> {
+): Promise<ServerComposition> {
+  const environment: AuthorizationEnvironment =
+    options.environment ??
+    (process.env.NODE_ENV === 'production' ? 'production' : 'development');
+  // Resolve identity and policy once at the composition root.  The production
+  // resolver is intentionally fail-closed when no host callback is supplied;
+  // the legacy API remains injectable for existing non-production callers.
+  const trustedActorResolver =
+    options.trustedActorResolver ??
+    createTrustedActorResolver({
+      environment,
+      resolvePrincipal: options.resolveTrustedPrincipal
+    });
+  const authorizationPolicy =
+    options.authorizationPolicy ?? createAuthorizationPolicy({ environment });
+
   // Keep every mutable dependency in this composition root. The API factory
   // remains injectable for tests, but the running server explicitly owns the
   // deterministic seed, complete operation registry, service, and publisher.
@@ -39,7 +81,17 @@ export async function createServerApp(
       handlers: {
         ...defaultOperationHandlers,
         ...(options.handlers ?? {})
-      }
+      },
+      orchestrationAdapters: approvalOperationAdapters,
+      authorizationPolicy,
+      environment,
+      principal: options.principal,
+      trustedPrincipal: options.trustedPrincipal,
+      principalResolver: options.principalResolver,
+      resolvePrincipal: options.resolvePrincipal,
+      idempotencyTtlMs: options.idempotencyTtlMs,
+      approvalTtlMs: options.approvalTtlMs,
+      traceIdentifiers: options.traceIdentifiers
     });
   const eventPublisher =
     options.eventPublisher ?? new StateEventPublisher(operationService.repository);
@@ -50,13 +102,18 @@ export async function createServerApp(
     operationService,
     eventPublisher,
     publicJobs,
+    trustedActorResolver,
+    authorizationPolicy,
+    environment,
     githubProspects: options.githubProspects,
     githubProspectAuthorization: options.githubProspectAuthorization,
-    githubProspectsOptions: options.githubProspectsOptions
+    githubProspectsOptions: options.githubProspectsOptions,
+    stateProjectionHooks: options.stateProjectionHooks,
+    stateProjection: options.stateProjection
   };
 
   // An injected service may still receive test/extension handlers, while the
-  // normal composition path above has already registered all 20 handlers.
+  // normal composition path above has already registered the complete handler registry.
   if (options.operationService && options.handlers) {
     apiOptions.handlers = options.handlers;
   }
@@ -79,18 +136,36 @@ export async function createServerApp(
     });
   }
 
-  return { app: api.app, api };
+  return {
+    app: api.app,
+    api,
+    environment,
+    trustedActorResolver,
+    authorizationPolicy
+  };
 }
 
 export async function startServer(options: ServerOptions = {}) {
-  const { app, api } = await createServerApp(options);
+  const {
+    app,
+    api,
+    environment,
+    trustedActorResolver,
+    authorizationPolicy
+  } = await createServerApp(options);
   const port = options.port ?? 3000;
   const host = options.host ?? 'localhost';
   const server = app.listen(port, host, () => {
     console.log(`Server running on http://${host}:${port}`);
   });
 
-  return { server, api };
+  return {
+    server,
+    api,
+    environment,
+    trustedActorResolver,
+    authorizationPolicy
+  };
 }
 
 function isEntrypoint(): boolean {

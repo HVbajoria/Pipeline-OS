@@ -70,8 +70,7 @@ const validOutput: GitHubProspectSearchResult = {
 
 describe('search_public_candidates shared operation contract', () => {
   it('is the twentieth canonical operation and does not alter persisted search_candidates', () => {
-    expect(OPERATION_NAMES).toHaveLength(20);
-    expect(OPERATION_NAMES).toContain(PUBLIC_OPERATION);
+    expect(OPERATION_NAMES.slice(0, 20)).toContain(PUBLIC_OPERATION);
     expect(OPERATION_IMPLEMENTATION_KEYS[PUBLIC_OPERATION]).toBe(
       'searchPublicCandidates'
     );
@@ -82,7 +81,12 @@ describe('search_public_candidates shared operation contract', () => {
     );
     expect(descriptor.readOnly).toBe(true);
     expect(descriptor.readOnlyHint).toBe(true);
-    expect(descriptor.annotations).toEqual({ readOnlyHint: true });
+    expect(descriptor.annotations).toEqual({
+      readOnlyHint: true,
+      executionClass: descriptor.executionClass,
+      requiresApproval: descriptor.approvalPolicy !== 'none',
+      planable: descriptor.planable
+    });
     expect(descriptor.inputSchema).toMatchObject({
       type: 'object',
       required: ['query'],

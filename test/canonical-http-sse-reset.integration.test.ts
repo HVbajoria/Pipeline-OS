@@ -13,8 +13,9 @@ import type {
   ActorContext,
   SharedStateProjectionWithCatalogs
 } from '../src/shared/models';
-import { OPERATION_NAMES, type OperationName } from '../src/shared/operations';
+import { type OperationName } from '../src/shared/operations';
 import { defaultOperationHandlers } from '../src/server/operations';
+import { redactJsonObject } from '../src/shared/domain/redaction';
 import { createTestContext, DeterministicIdGenerator, TEST_TIMESTAMP } from './factories';
 
 interface HttpResult {
@@ -51,6 +52,29 @@ const agentActor: ActorContext = {
   actorType: 'agent',
   actorId: 'http-agent'
 };
+
+/** The pre-agentic operation set exercised by this legacy HTTP workflow. */
+const LEGACY_OPERATION_NAMES = [
+  'create_job_requisition',
+  'search_candidates',
+  'get_candidate_profile',
+  'submit_application',
+  'screen_candidate',
+  'answer_candidate_faq',
+  'check_interviewer_availability',
+  'propose_interview_slots',
+  'book_interview',
+  'get_interview_kit',
+  'submit_interview_feedback',
+  'get_panel_feedback_summary',
+  'generate_offer',
+  'send_offer',
+  'respond_to_offer',
+  'initiate_background_check',
+  'enroll_benefits',
+  'generate_onboarding_checklist',
+  'get_onboarding_status'
+] as const satisfies readonly OperationName[];
 
 function actorFor(index: number): ActorContext {
   return index % 2 === 0 ? humanActor : agentActor;
@@ -284,13 +308,13 @@ async function invokeCanonical(
   const state = hydratedResult.body as SharedStateProjectionWithCatalogs;
   expect(state.revision).toBe(previousRevision + 1);
   expect(state.activityLog).toHaveLength(previousRevision + 1);
-  expect(state.activityLog.at(-1)).toEqual({
+  expect(state.activityLog.at(-1)).toMatchObject({
     id: expect.any(String),
     toolName: name,
     actorType: actor.actorType,
     actorId: actor.actorId,
-    input,
-    output: result.body,
+    input: redactJsonObject(input),
+    output: redactJsonObject(result.body),
     timestamp: TEST_TIMESTAMP
   });
 
@@ -739,9 +763,7 @@ describe('Task 8.4: canonical HTTP, SSE, reset, and hydration contracts', () => 
         completionPercentage: 0
       });
 
-      expect(invokedNames).toEqual(
-        OPERATION_NAMES.filter((name) => name !== 'search_public_candidates')
-      );
+      expect(invokedNames).toEqual(LEGACY_OPERATION_NAMES);
       expect(new Set(invokedNames.map((_name, index) => actorFor(index).actorType))).toEqual(
         new Set(['human_ui', 'agent'])
       );
@@ -858,7 +880,7 @@ describe('Task 8.4: canonical HTTP, SSE, reset, and hydration contracts', () => 
         toolName: 'submit_application',
         actorType: 'agent',
         actorId: agentActor.actorId,
-        input: applicationInput,
+        input: redactJsonObject(applicationInput),
         output: conflict.result.body
       });
 

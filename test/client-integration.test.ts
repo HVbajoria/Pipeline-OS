@@ -169,7 +169,12 @@ describe('typed client, WebMCP, store, and synchronization integration', () => {
     expect(after).toEqual(before);
     expect(tools).toHaveLength(OPERATION_NAMES.length);
     expect(tools.map((tool) => tool.name)).toEqual(OPERATION_NAMES);
-    expect(OPERATION_REGISTRY.search_candidates.annotations).toEqual({ readOnlyHint: true });
+    expect(OPERATION_REGISTRY.search_candidates.annotations).toEqual({
+      readOnlyHint: true,
+      executionClass: OPERATION_REGISTRY.search_candidates.executionClass,
+      requiresApproval: OPERATION_REGISTRY.search_candidates.approvalPolicy !== 'none',
+      planable: OPERATION_REGISTRY.search_candidates.planable
+    });
   });
 
   it('registers the native document contract and the legacy navigator polyfill shape', () => {

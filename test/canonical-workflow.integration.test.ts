@@ -12,7 +12,6 @@ import type {
   SharedStateWithCatalogs
 } from '../src/shared/models';
 import {
-  OPERATION_NAMES,
   type OperationInputMap,
   type OperationName,
   type OperationOutputMap
@@ -21,6 +20,29 @@ import { defaultOperationHandlers } from '../src/server/operations';
 import { OperationService } from '../src/server/operationService';
 import { createSeed } from '../src/server/seed';
 import { TEST_TIMESTAMP, createTestContext } from './factories';
+
+/** The pre-agentic workflow list retained by this legacy regression scenario. */
+const LEGACY_OPERATION_NAMES = [
+  'create_job_requisition',
+  'search_candidates',
+  'get_candidate_profile',
+  'submit_application',
+  'screen_candidate',
+  'answer_candidate_faq',
+  'check_interviewer_availability',
+  'propose_interview_slots',
+  'book_interview',
+  'get_interview_kit',
+  'submit_interview_feedback',
+  'get_panel_feedback_summary',
+  'generate_offer',
+  'send_offer',
+  'respond_to_offer',
+  'initiate_background_check',
+  'enroll_benefits',
+  'generate_onboarding_checklist',
+  'get_onboarding_status'
+] as const satisfies readonly OperationName[];
 
 /** Domain collections intentionally exclude revision and the audit stream. */
 function domainSnapshot(state: SharedStateWithCatalogs) {
@@ -603,7 +625,7 @@ describe('Task 8.5: canonical server workflow and regression matrix', () => {
       'get_onboarding_status'
     ]);
     expect(new Set(activityNames)).toEqual(
-      new Set(OPERATION_NAMES.filter((name) => name !== 'search_public_candidates'))
+      new Set(LEGACY_OPERATION_NAMES)
     );
     expect(repository.read().applications.get(applicationId)?.status).toBe('onboarding');
   });

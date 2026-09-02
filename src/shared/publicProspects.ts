@@ -1,10 +1,57 @@
 import { ValidationError } from './errors';
-import type { Timestamp } from './models';
+import type {
+  ActorContext,
+  CandidateId,
+  SourcedProspectId,
+  Timestamp
+} from './models';
 
 /** Public-prospect source values are intentionally narrow and JSON-safe. */
 export const GITHUB_PROSPECT_SOURCE = 'github' as const;
 export const GITHUB_PROSPECT_DATA_ORIGIN = 'public_github' as const;
 export const GITHUB_PROSPECT_CONSENT_STATUS = 'not_provided' as const;
+/** Shared default used by the demo UI and the default authorization policy. */
+export const PUBLIC_PROSPECT_CONSENT_POLICY_VERSION = 'p11.2.v1' as const;
+export const PUBLIC_PROSPECT_DEFAULT_CONSENT_SCOPE = 'candidate-profile-import' as const;
+
+export const PUBLIC_PROSPECT_CONSENT_STATUSES = [
+  'not_provided',
+  'explicit',
+  'withdrawn',
+  'expired'
+] as const;
+export type PublicProspectConsentStatus =
+  (typeof PUBLIC_PROSPECT_CONSENT_STATUSES)[number];
+
+export const PUBLIC_PROSPECT_CONSENT_METHODS = [
+  'candidate_submitted',
+  'approved_consent_channel'
+] as const;
+export type PublicProspectConsentMethod =
+  (typeof PUBLIC_PROSPECT_CONSENT_METHODS)[number];
+
+export const PUBLIC_PROSPECT_FIELD_ORIGINS = [
+  'github_public',
+  'candidate_submitted',
+  'recruiter_entered'
+] as const;
+export type PublicProspectFieldOrigin =
+  (typeof PUBLIC_PROSPECT_FIELD_ORIGINS)[number];
+
+export const PUBLIC_PROSPECT_CANDIDATE_LINK_ORIGINS = [
+  'created_from_candidate_submitted',
+  'preexisting_candidate'
+] as const;
+export type PublicProspectCandidateLinkOrigin =
+  (typeof PUBLIC_PROSPECT_CANDIDATE_LINK_ORIGINS)[number];
+
+export const PUBLIC_PROSPECT_SOURCE_RECORD_MAX_LENGTH = 100;
+export const PUBLIC_PROSPECT_URL_MAX_LENGTH = 2048;
+export const PUBLIC_PROSPECT_SCOPE_MAX_LENGTH = 200;
+export const PUBLIC_PROSPECT_EVIDENCE_REFERENCE_MAX_LENGTH = 256;
+export const PUBLIC_PROSPECT_POLICY_VERSION_MAX_LENGTH = 80;
+export const PUBLIC_PROSPECT_FIELD_NAME_MAX_LENGTH = 100;
+export const PUBLIC_PROSPECT_MAX_FIELD_ORIGINS = 32;
 
 export const GITHUB_PROSPECT_QUERY_MAX_LENGTH = 100;
 export const GITHUB_PROSPECT_FILTER_MAX_LENGTH = 60;
@@ -19,6 +66,66 @@ export interface GitHubProspectSearchInput {
 }
 
 export type NormalizedGitHubProspectSearchInput = GitHubProspectSearchInput;
+
+export interface PublicProspectSourceFilters {
+  language?: string;
+  location?: string;
+}
+
+export interface PublicProspectSourceReference {
+  source: typeof GITHUB_PROSPECT_SOURCE;
+  sourceRecordId: string;
+  profileUrl: string;
+  canonicalSourceUrl: string;
+  sourceQuery: string;
+  sourceFilters?: PublicProspectSourceFilters;
+  fetchedAt: Timestamp;
+  attribution: GitHubProspectAttribution;
+}
+
+/** Safe consent metadata; evidence contents remain server-private. */
+export interface PublicProspectConsent {
+  method: PublicProspectConsentMethod;
+  scope: string;
+  capturedAt: Timestamp;
+  capturedBy: ActorContext;
+  evidenceRef: string;
+  policyVersion: string;
+}
+
+/** Candidate-supplied values are kept separate from public-source fields. */
+export interface CandidateSubmittedProfile {
+  name: string;
+  email: string;
+  resumeText: string;
+  skills?: string[];
+  experienceYears?: number;
+}
+
+export interface SourcedProspectRecord {
+  id: SourcedProspectId;
+  source: typeof GITHUB_PROSPECT_SOURCE;
+  sourceRecordId: string;
+  profileUrl: string;
+  canonicalSourceUrl: string;
+  sourceQuery: string;
+  sourceFilters?: PublicProspectSourceFilters;
+  fetchedAt: Timestamp;
+  importedAt: Timestamp;
+  dataOrigin: typeof GITHUB_PROSPECT_DATA_ORIGIN;
+  consentStatus: PublicProspectConsentStatus;
+  consent: PublicProspectConsent | null;
+  fieldOrigins: Record<string, PublicProspectFieldOrigin>;
+  attribution: GitHubProspectAttribution;
+  retentionExpiresAt: Timestamp;
+  /** Set by the canonical revoke path and retained as a safe lifecycle marker. */
+  withdrawnAt?: Timestamp;
+  /** Set by an explicit retention cleanup hook when the retention window ends. */
+  expiredAt?: Timestamp;
+  /** Distinguishes a candidate created by this consent from a preexisting record. */
+  candidateLinkOrigin?: PublicProspectCandidateLinkOrigin;
+  candidateId?: CandidateId;
+}
 
 /**
  * Allowlisted public GitHub profile projection. Private contact, resume, and

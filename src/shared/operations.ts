@@ -5,44 +5,90 @@
  */
 
 import type {
+  ActivityLogEntry,
+  ActivityPhase,
+  ActorContext,
+  ApprovalCard,
+  ApprovalCardPolicy,
+  ApprovalCardRecord,
+  ApprovalCardStatus,
+  ApprovalCardSummary,
+  ApprovalId,
+  ApprovalPolicy,
+  ApprovalRecordEffect,
   ApplicationRecord,
   BackgroundCheckStatus,
   CandidateRecord,
+  CapabilityDescriptor,
+  CapabilityManifest,
   CompensationBand,
+  CorrelationId,
   DateRange,
   ExperienceLevel,
+  GeneratedIdPlaceholder,
   InterviewRecommendation,
+  InvocationMetadata,
   JobRequisition,
+  JsonObject,
   OfferDecision,
   OfferResponseStatus,
+  OperationExecutionClass,
   PlanSelections,
   ScorecardRecord,
   ScorecardRecommendation,
+  SourcedProspectId,
+  SpanId,
   StartDate,
   TaskCompletion,
-  Timestamp
+  Timestamp,
+  TraceId,
+  TraceSpan,
+  TraceSpanStatus
 } from './models';
 import type {
+  CandidateSubmittedProfile,
   GitHubProspect,
   GitHubProspectAttribution,
   GitHubProspectCacheMetadata,
   GitHubProspectSearchInput,
   GitHubProspectSearchResult,
-  NormalizedGitHubProspectSearchInput
+  NormalizedGitHubProspectSearchInput,
+  PublicProspectConsent,
+  PublicProspectFieldOrigin,
+  PublicProspectSourceReference,
+  SourcedProspectRecord
 } from './publicProspects';
 import {
   GITHUB_PROSPECT_DATA_ORIGIN,
   GITHUB_PROSPECT_FILTER_MAX_LENGTH,
   GITHUB_PROSPECT_QUERY_MAX_LENGTH,
   GITHUB_PROSPECT_SAFE_TEXT_PATTERN,
-  GITHUB_PROSPECT_SOURCE
+  GITHUB_PROSPECT_SOURCE,
+  PUBLIC_PROSPECT_CONSENT_METHODS,
+  PUBLIC_PROSPECT_CONSENT_STATUSES,
+  PUBLIC_PROSPECT_CANDIDATE_LINK_ORIGINS,
+  PUBLIC_PROSPECT_EVIDENCE_REFERENCE_MAX_LENGTH,
+  PUBLIC_PROSPECT_FIELD_ORIGINS,
+  PUBLIC_PROSPECT_POLICY_VERSION_MAX_LENGTH,
+  PUBLIC_PROSPECT_SCOPE_MAX_LENGTH,
+  PUBLIC_PROSPECT_SOURCE_RECORD_MAX_LENGTH,
+  PUBLIC_PROSPECT_URL_MAX_LENGTH
 } from './publicProspects';
 import {
+  APPROVAL_CARD_POLICIES,
+  APPROVAL_CARD_STATUSES,
+  APPROVAL_POLICIES,
+  APPROVAL_RECORD_EFFECTS,
+  ACTOR_TYPES,
   BACKGROUND_CHECK_STATUSES,
+  CAPABILITY_DENIAL_REASONS,
   EXPERIENCE_LEVELS,
+  ONBOARDING_TASK_STATUSES,
+  OPERATION_EXECUTION_CLASSES,
   OFFER_DECISIONS,
   OFFER_RESPONSE_STATUSES,
-  SCORECARD_RECOMMENDATIONS
+  SCORECARD_RECOMMENDATIONS,
+  TRACE_SPAN_STATUSES
 } from './models';
 
 /** A JSON Schema type supported by the shared validator. */
@@ -84,6 +130,7 @@ export interface JsonSchema {
   exclusiveMaximum?: number;
   minItems?: number;
   maxItems?: number;
+  uniqueItems?: boolean;
   minProperties?: number;
   maxProperties?: number;
 }
@@ -112,10 +159,30 @@ export const OPERATION_NAMES = [
   'initiate_background_check',
   'enroll_benefits',
   'generate_onboarding_checklist',
-  'get_onboarding_status'
+  'get_onboarding_status',
+  'plan_operation',
+  'get_approval_card',
+  'approve_operation_plan',
+  'reject_operation_plan',
+  'commit_operation_plan',
+  'compare_candidates',
+  'get_recruiting_workflow_status',
+  'import_public_prospect',
+  'revoke_public_prospect_consent',
+  'coordinate_interview_workflow',
+  'coordinate_onboarding_workflow',
+  'discover_capabilities'
 ] as const;
 
 export type OperationName = (typeof OPERATION_NAMES)[number];
+
+/** Operations that may be selected as a target by plan_operation. */
+export const PLANABLE_OPERATION_NAMES = [
+  'import_public_prospect',
+  'coordinate_interview_workflow',
+  'coordinate_onboarding_workflow'
+] as const;
+export type PlanableOperationName = (typeof PLANABLE_OPERATION_NAMES)[number];
 
 /** Stable implementation keys used by the server operation dispatcher. */
 export const OPERATION_IMPLEMENTATION_KEYS = {
@@ -138,7 +205,19 @@ export const OPERATION_IMPLEMENTATION_KEYS = {
   initiate_background_check: 'initiateBackgroundCheck',
   enroll_benefits: 'enrollBenefits',
   generate_onboarding_checklist: 'generateOnboardingChecklist',
-  get_onboarding_status: 'getOnboardingStatus'
+  get_onboarding_status: 'getOnboardingStatus',
+  plan_operation: 'planOperation',
+  get_approval_card: 'getApprovalCard',
+  approve_operation_plan: 'approveOperationPlan',
+  reject_operation_plan: 'rejectOperationPlan',
+  commit_operation_plan: 'commitOperationPlan',
+  compare_candidates: 'compareCandidates',
+  get_recruiting_workflow_status: 'getRecruitingWorkflowStatus',
+  import_public_prospect: 'importPublicProspect',
+  revoke_public_prospect_consent: 'revokePublicProspectConsent',
+  coordinate_interview_workflow: 'coordinateInterviewWorkflow',
+  coordinate_onboarding_workflow: 'coordinateOnboardingWorkflow',
+  discover_capabilities: 'discoverCapabilities'
 } as const satisfies { readonly [N in OperationName]: string };
 
 export type OperationImplementationKey =
@@ -353,6 +432,8 @@ export interface OnboardingTaskSummary {
   taskId: string;
   taskName: string;
   dueDate: Timestamp;
+  /** Coordinator responses include the authoritative changed status; legacy checklist responses omit it. */
+  status?: 'pending' | 'in_progress' | 'complete';
 }
 
 export interface GenerateOnboardingChecklistOutput {
@@ -369,6 +450,229 @@ export interface GetOnboardingStatusOutput {
   taskCompletion: TaskCompletion;
   completionPercentage: number;
 }
+
+// ---------------------------------------------------------------------------
+// Approval, provenance, comparison, workflow, and capability contracts
+// ---------------------------------------------------------------------------
+
+export interface PlanOperationInput {
+  targetOperation: PlanableOperationName;
+  /** Target input remains nested and is never merged into invocation metadata. */
+  input: JsonObject;
+}
+
+export interface PlanOperationOutput {
+  approvalId: ApprovalId;
+  targetOperation: PlanableOperationName;
+  proposedOutput: JsonObject;
+  changeSummary: string[];
+  warnings: string[];
+  blockers: string[];
+  baseRevision: number;
+  expiresAt: Timestamp;
+  requiredApproval: ApprovalCardPolicy;
+  requiredCapability: string;
+  status: 'pending';
+  /** Policy version captured with the approval card, when available. */
+  policyVersion?: string;
+  redactions: string[];
+}
+
+export interface GetApprovalCardInput {
+  approvalId: ApprovalId;
+}
+export type GetApprovalCardOutput = ApprovalCardSummary;
+
+export interface ApproveOperationPlanInput {
+  approvalId: ApprovalId;
+  note?: string;
+}
+
+export interface ApproveOperationPlanOutput {
+  approvalId: ApprovalId;
+  status: 'approved';
+  approvedBy: ActorContext;
+  approvedAt: Timestamp;
+  note?: string;
+  policyVersion?: string;
+}
+
+export interface RejectOperationPlanInput {
+  approvalId: ApprovalId;
+  note?: string;
+}
+
+export interface RejectOperationPlanOutput {
+  approvalId: ApprovalId;
+  status: 'rejected';
+  rejectedBy: ActorContext;
+  rejectedAt: Timestamp;
+  note?: string;
+  policyVersion?: string;
+}
+
+export interface CommitOperationPlanInput {
+  approvalId: ApprovalId;
+}
+
+export interface CommitOperationPlanOutput {
+  approvalId: ApprovalId;
+  targetOperation: OperationName;
+  status: 'committed';
+  output: JsonObject;
+  committedAt: Timestamp;
+  redactions?: string[];
+}
+
+export interface CompareCandidatesInput {
+  jobId: string;
+  candidateIds: string[];
+}
+
+export interface CandidateComparisonRequirementMatch {
+  matched: string[];
+  missing: string[];
+  score: number;
+}
+
+export interface CandidateComparisonSkillOverlap {
+  matched: string[];
+  score: number;
+}
+
+export interface CandidateComparisonExperienceFit {
+  evidence: string;
+  score: number;
+}
+
+export interface CandidateComparisonScoreBreakdown {
+  requirementMatch: CandidateComparisonRequirementMatch;
+  skillOverlap: CandidateComparisonSkillOverlap;
+  experienceFit: CandidateComparisonExperienceFit;
+}
+
+export interface CandidateComparison {
+  candidateId: string;
+  name: string;
+  rank: number;
+  totalScore: number;
+  scoreBreakdown: CandidateComparisonScoreBreakdown;
+  rationale: string;
+  limitations: string[];
+}
+
+export interface CompareCandidatesOutput {
+  jobId: string;
+  revision: number;
+  candidates: CandidateComparison[];
+}
+
+export type WorkflowStatusDetail = 'summary' | 'full';
+
+export interface GetRecruitingWorkflowStatusInput {
+  jobId?: string;
+  applicationId?: string;
+  candidateId?: string;
+  detail?: WorkflowStatusDetail;
+  limit?: number;
+}
+
+export interface WorkflowApplicationSummary {
+  applicationId: string;
+  candidateId: string;
+  jobId: string;
+  status: string;
+  currentStage: string;
+  blockers: string[];
+  nextActions: string[];
+}
+
+export interface RecruitingWorkflowScope {
+  jobId?: string;
+  applicationId?: string;
+  candidateId?: string;
+}
+
+export interface GetRecruitingWorkflowStatusOutput {
+  revision: number;
+  scope: RecruitingWorkflowScope;
+  countsByApplicationStatus: Record<string, number>;
+  applications: WorkflowApplicationSummary[];
+  pendingApprovals: ApprovalCardSummary[];
+  blockers: string[];
+  nextActions: string[];
+  generatedAt: Timestamp;
+}
+
+export interface ImportPublicProspectInput extends PublicProspectSourceReference {
+  consent: PublicProspectConsent;
+  candidateProfile?: CandidateSubmittedProfile;
+}
+
+export interface ImportPublicProspectOutput {
+  sourcedProspect: SourcedProspectRecord;
+  candidateId?: string;
+  status: 'imported' | 'linked';
+}
+
+export interface RevokePublicProspectConsentInput {
+  sourcedProspectId: SourcedProspectId;
+  reason?: string;
+}
+
+export interface RevokePublicProspectConsentOutput {
+  sourcedProspectId: SourcedProspectId;
+  status: 'withdrawn';
+  withdrawnAt: Timestamp;
+  retentionAction: string;
+}
+
+export type CoordinateInterviewAction = 'propose_slots' | 'book_slot';
+
+export interface CoordinateInterviewWorkflowInput {
+  applicationId: string;
+  action: CoordinateInterviewAction;
+  slot?: Timestamp;
+}
+
+export interface CoordinatedBookedInterview {
+  interviewId: string;
+  slot: Timestamp;
+}
+
+export interface CoordinateInterviewWorkflowOutput {
+  applicationId: string;
+  stage: string;
+  proposedSlots: ProposedInterviewSlot[];
+  bookedInterview: CoordinatedBookedInterview | null;
+  nextAction: string | null;
+  blockers: string[];
+}
+
+export type CoordinateOnboardingAction =
+  | 'initialize_checklist'
+  | 'update_task';
+
+export interface CoordinateOnboardingWorkflowInput {
+  offerId: string;
+  action: CoordinateOnboardingAction;
+  taskId?: string;
+  status?: 'pending' | 'in_progress' | 'complete';
+}
+
+export interface CoordinateOnboardingWorkflowOutput {
+  offerId: string;
+  changedTasks: OnboardingTaskSummary[];
+  backgroundCheckStatus: BackgroundCheckStatus | null;
+  benefitsEnrolled: boolean;
+  taskCompletion: TaskCompletion;
+  completionPercentage: number;
+  blockers: string[];
+  nextActions: string[];
+}
+
+export type DiscoverCapabilitiesInput = Record<string, never>;
+export type DiscoverCapabilitiesOutput = CapabilityManifest;
 
 /** Input types indexed by the canonical operation name. */
 export interface OperationInputMap {
@@ -392,6 +696,18 @@ export interface OperationInputMap {
   enroll_benefits: EnrollBenefitsInput;
   generate_onboarding_checklist: GenerateOnboardingChecklistInput;
   get_onboarding_status: GetOnboardingStatusInput;
+  plan_operation: PlanOperationInput;
+  get_approval_card: GetApprovalCardInput;
+  approve_operation_plan: ApproveOperationPlanInput;
+  reject_operation_plan: RejectOperationPlanInput;
+  commit_operation_plan: CommitOperationPlanInput;
+  compare_candidates: CompareCandidatesInput;
+  get_recruiting_workflow_status: GetRecruitingWorkflowStatusInput;
+  import_public_prospect: ImportPublicProspectInput;
+  revoke_public_prospect_consent: RevokePublicProspectConsentInput;
+  coordinate_interview_workflow: CoordinateInterviewWorkflowInput;
+  coordinate_onboarding_workflow: CoordinateOnboardingWorkflowInput;
+  discover_capabilities: DiscoverCapabilitiesInput;
 }
 
 /** Output types indexed by the canonical operation name. */
@@ -416,6 +732,26 @@ export interface OperationOutputMap {
   enroll_benefits: EnrollBenefitsOutput;
   generate_onboarding_checklist: GenerateOnboardingChecklistOutput;
   get_onboarding_status: GetOnboardingStatusOutput;
+  plan_operation: PlanOperationOutput;
+  get_approval_card: GetApprovalCardOutput;
+  approve_operation_plan: ApproveOperationPlanOutput;
+  reject_operation_plan: RejectOperationPlanOutput;
+  commit_operation_plan: CommitOperationPlanOutput;
+  compare_candidates: CompareCandidatesOutput;
+  get_recruiting_workflow_status: GetRecruitingWorkflowStatusOutput;
+  import_public_prospect: ImportPublicProspectOutput;
+  revoke_public_prospect_consent: RevokePublicProspectConsentOutput;
+  coordinate_interview_workflow: CoordinateInterviewWorkflowOutput;
+  coordinate_onboarding_workflow: CoordinateOnboardingWorkflowOutput;
+  discover_capabilities: DiscoverCapabilitiesOutput;
+}
+
+/** Additive WebMCP annotations derived from the canonical operation descriptor. */
+export interface OperationAnnotations {
+  readOnlyHint: boolean;
+  executionClass: OperationExecutionClass;
+  requiresApproval: boolean;
+  planable: boolean;
 }
 
 /** A WebMCP-compatible descriptor for one shared operation. */
@@ -426,9 +762,12 @@ export interface OperationDescriptor<N extends OperationName = OperationName> {
   readOnly: boolean;
   /** WebMCP annotation name used by native runtimes. */
   readOnlyHint: boolean;
-  annotations: {
-    readOnlyHint: boolean;
-  };
+  annotations: OperationAnnotations;
+  executionClass: OperationExecutionClass;
+  directlyCallable: boolean;
+  planable: boolean;
+  approvalPolicy: ApprovalPolicy;
+  requiredCapability: string;
   implementationKey: OperationImplementationKey;
   inputSchema: JsonSchema;
   outputSchema: JsonSchema;
@@ -716,22 +1055,489 @@ const competencySchema: JsonSchema = {
   additionalProperties: false
 };
 
+/** Bounded limits for additive invocation, approval, provenance, and workflow contracts. */
+export const MAX_METADATA_ID_LENGTH = 128;
+export const MAX_IDEMPOTENCY_KEY_LENGTH = 256;
+export const MAX_METADATA_REVISION = Number.MAX_SAFE_INTEGER;
+export const MAX_APPROVAL_RECORDS = 20;
+export const MAX_APPROVAL_SUMMARY_ITEMS = 20;
+export const MAX_APPROVAL_TEXT_LENGTH = 500;
+export const MAX_COMPARISON_CANDIDATES = 5;
+export const MAX_WORKFLOW_STATUS_ITEMS = 50;
+export const MAX_WORKFLOW_TEXT_LENGTH = 300;
+export const MAX_TRACE_SPANS = 50;
+export const MAX_TRACE_SUMMARY_PROPERTIES = 20;
+export const MAX_CAPABILITIES = 64;
+export const MAX_PROVENANCE_FIELDS = 32;
+export const MAX_PROSPECT_URL_LENGTH = PUBLIC_PROSPECT_URL_MAX_LENGTH;
+
+export const OPERATION_CONTRACT_LIMITS = {
+  metadataId: MAX_METADATA_ID_LENGTH,
+  idempotencyKey: MAX_IDEMPOTENCY_KEY_LENGTH,
+  approvalRecords: MAX_APPROVAL_RECORDS,
+  approvalSummaryItems: MAX_APPROVAL_SUMMARY_ITEMS,
+  comparisonCandidates: MAX_COMPARISON_CANDIDATES,
+  workflowStatusItems: MAX_WORKFLOW_STATUS_ITEMS,
+  traceSpans: MAX_TRACE_SPANS,
+  capabilities: MAX_CAPABILITIES,
+  provenanceFields: MAX_PROVENANCE_FIELDS
+} as const;
+
+const safeIdentifierSchema = (maxLength = MAX_METADATA_ID_LENGTH): JsonSchema => ({
+  type: 'string',
+  minLength: 1,
+  maxLength,
+  pattern: '^[^\\u0000-\\u001F\\u007F]+$'
+});
+
+const boundedTextSchema = (maxLength: number): JsonSchema => ({
+  type: 'string',
+  minLength: 1,
+  maxLength,
+  pattern: '^[^\\u0000-\\u001F\\u007F]*$'
+});
+
+const boundedTextArraySchema = (maxItems: number, maxLength: number): JsonSchema => ({
+  type: 'array',
+  maxItems,
+  items: boundedTextSchema(maxLength)
+});
+
+const jsonObjectSchema: JsonSchema = {
+  type: 'object',
+  maxProperties: 32,
+  additionalProperties: true
+};
+
+const actorContextSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    actorType: { type: 'string', enum: ACTOR_TYPES },
+    actorId: safeIdentifierSchema()
+  },
+  required: ['actorType', 'actorId'],
+  additionalProperties: false
+};
+
+const invocationMetadataSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    correlationId: safeIdentifierSchema(MAX_METADATA_ID_LENGTH),
+    idempotencyKey: safeIdentifierSchema(MAX_IDEMPOTENCY_KEY_LENGTH),
+    expectedRevision: {
+      type: 'integer',
+      minimum: 0,
+      maximum: MAX_METADATA_REVISION
+    },
+    approvalId: safeIdentifierSchema(MAX_METADATA_ID_LENGTH),
+    parentSpanId: safeIdentifierSchema(MAX_METADATA_ID_LENGTH)
+  },
+  additionalProperties: false,
+  maxProperties: 5
+};
+
+/** Public schema used by transport/client validators; metadata is not input. */
+export const INVOCATION_METADATA_SCHEMA = invocationMetadataSchema;
+export const operationInvocationMetadataSchema = INVOCATION_METADATA_SCHEMA;
+
+const affectedRecordSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    type: boundedTextSchema(100),
+    id: safeIdentifierSchema(),
+    effect: { type: 'string', enum: APPROVAL_RECORD_EFFECTS }
+  },
+  required: ['type', 'id', 'effect'],
+  additionalProperties: false
+};
+
+const approvalCardSummarySchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    id: safeIdentifierSchema(),
+    targetOperation: boundedTextSchema(100),
+    requestedBy: actorContextSchema,
+    requestedAt: timestampSchema,
+    baseRevision: { type: 'integer', minimum: 0 },
+    affectedRecords: {
+      type: 'array',
+      maxItems: MAX_APPROVAL_RECORDS,
+      items: affectedRecordSchema
+    },
+    proposedOutput: jsonObjectSchema,
+    changeSummary: boundedTextArraySchema(
+      MAX_APPROVAL_SUMMARY_ITEMS,
+      MAX_APPROVAL_TEXT_LENGTH
+    ),
+    warnings: boundedTextArraySchema(
+      MAX_APPROVAL_SUMMARY_ITEMS,
+      MAX_APPROVAL_TEXT_LENGTH
+    ),
+    blockers: boundedTextArraySchema(
+      MAX_APPROVAL_SUMMARY_ITEMS,
+      MAX_WORKFLOW_TEXT_LENGTH
+    ),
+    requiredCapability: boundedTextSchema(160),
+    approvalPolicy: { type: 'string', enum: APPROVAL_CARD_POLICIES },
+    policyVersion: boundedTextSchema(160),
+    status: { type: 'string', enum: APPROVAL_CARD_STATUSES },
+    approvalNote: boundedTextSchema(MAX_APPROVAL_TEXT_LENGTH),
+    rejectionNote: boundedTextSchema(MAX_APPROVAL_TEXT_LENGTH),
+    approvedBy: actorContextSchema,
+    approvedAt: timestampSchema,
+    rejectedBy: actorContextSchema,
+    rejectedAt: timestampSchema,
+    expiresAt: timestampSchema,
+    correlationId: safeIdentifierSchema(),
+    traceId: safeIdentifierSchema(),
+    committedAt: timestampSchema,
+    redactions: boundedTextArraySchema(MAX_APPROVAL_SUMMARY_ITEMS, 160)
+  },
+  required: [
+    'id',
+    'targetOperation',
+    'requestedBy',
+    'requestedAt',
+    'baseRevision',
+    'affectedRecords',
+    'proposedOutput',
+    'changeSummary',
+    'warnings',
+    'requiredCapability',
+    'approvalPolicy',
+    'status',
+    'expiresAt',
+    'correlationId',
+    'traceId'
+  ],
+  additionalProperties: false,
+  maxProperties: 26
+};
+
+const sourceFiltersSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    language: publicProspectInputTextSchema,
+    location: publicProspectInputTextSchema
+  },
+  additionalProperties: false,
+  maxProperties: 2
+};
+
+const publicProspectSourceReferenceSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    source: { type: 'string', const: GITHUB_PROSPECT_SOURCE },
+    sourceRecordId: boundedTextSchema(PUBLIC_PROSPECT_SOURCE_RECORD_MAX_LENGTH),
+    profileUrl: boundedTextSchema(MAX_PROSPECT_URL_LENGTH),
+    canonicalSourceUrl: boundedTextSchema(MAX_PROSPECT_URL_LENGTH),
+    sourceQuery: publicProspectQuerySchema,
+    sourceFilters: sourceFiltersSchema,
+    fetchedAt: timestampSchema,
+    attribution: publicProspectAttributionSchema
+  },
+  required: [
+    'source',
+    'sourceRecordId',
+    'profileUrl',
+    'canonicalSourceUrl',
+    'sourceQuery',
+    'fetchedAt',
+    'attribution'
+  ],
+  additionalProperties: false,
+  maxProperties: 8
+};
+
+const consentSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    method: {
+      type: 'string',
+      enum: PUBLIC_PROSPECT_CONSENT_METHODS
+    },
+    scope: boundedTextSchema(PUBLIC_PROSPECT_SCOPE_MAX_LENGTH),
+    capturedAt: timestampSchema,
+    capturedBy: actorContextSchema,
+    evidenceRef: safeIdentifierSchema(PUBLIC_PROSPECT_EVIDENCE_REFERENCE_MAX_LENGTH),
+    policyVersion: boundedTextSchema(80)
+  },
+  required: [
+    'method',
+    'scope',
+    'capturedAt',
+    'capturedBy',
+    'evidenceRef',
+    'policyVersion'
+  ],
+  additionalProperties: false,
+  maxProperties: 6
+};
+
+const candidateSubmittedProfileSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    name: boundedTextSchema(160),
+    email: boundedTextSchema(320),
+    resumeText: boundedTextSchema(10000),
+    skills: boundedTextArraySchema(30, 80),
+    experienceYears: { type: 'number', minimum: 0, maximum: 100 }
+  },
+  required: ['name', 'email', 'resumeText'],
+  additionalProperties: false,
+  maxProperties: 5
+};
+
+const sourcedProspectSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    id: idSchema,
+    source: { type: 'string', const: GITHUB_PROSPECT_SOURCE },
+    sourceRecordId: boundedTextSchema(PUBLIC_PROSPECT_SOURCE_RECORD_MAX_LENGTH),
+    profileUrl: boundedTextSchema(MAX_PROSPECT_URL_LENGTH),
+    canonicalSourceUrl: boundedTextSchema(MAX_PROSPECT_URL_LENGTH),
+    sourceQuery: publicProspectQuerySchema,
+    sourceFilters: sourceFiltersSchema,
+    fetchedAt: timestampSchema,
+    importedAt: timestampSchema,
+    dataOrigin: { type: 'string', const: GITHUB_PROSPECT_DATA_ORIGIN },
+    consentStatus: {
+      type: 'string',
+      enum: PUBLIC_PROSPECT_CONSENT_STATUSES
+    },
+    consent: {
+      type: ['object', 'null'] as const,
+      properties: {
+        method: {
+          type: 'string',
+          enum: PUBLIC_PROSPECT_CONSENT_METHODS
+        },
+        scope: boundedTextSchema(PUBLIC_PROSPECT_SCOPE_MAX_LENGTH),
+        capturedAt: timestampSchema,
+        capturedBy: actorContextSchema,
+        evidenceRef: safeIdentifierSchema(PUBLIC_PROSPECT_EVIDENCE_REFERENCE_MAX_LENGTH),
+        policyVersion: boundedTextSchema(80)
+      },
+      required: [
+        'method',
+        'scope',
+        'capturedAt',
+        'capturedBy',
+        'evidenceRef',
+        'policyVersion'
+      ],
+      additionalProperties: false
+    },
+    fieldOrigins: {
+      type: 'object',
+      maxProperties: MAX_PROVENANCE_FIELDS,
+      additionalProperties: {
+        type: 'string',
+        enum: PUBLIC_PROSPECT_FIELD_ORIGINS
+      }
+    },
+    attribution: publicProspectAttributionSchema,
+    retentionExpiresAt: timestampSchema,
+    withdrawnAt: timestampSchema,
+    expiredAt: timestampSchema,
+    candidateLinkOrigin: {
+      type: 'string',
+      enum: PUBLIC_PROSPECT_CANDIDATE_LINK_ORIGINS
+    },
+    candidateId: idSchema
+  },
+  required: [
+    'id',
+    'source',
+    'sourceRecordId',
+    'profileUrl',
+    'canonicalSourceUrl',
+    'sourceQuery',
+    'fetchedAt',
+    'importedAt',
+    'dataOrigin',
+    'consentStatus',
+    'consent',
+    'fieldOrigins',
+    'attribution',
+    'retentionExpiresAt'
+  ],
+  additionalProperties: false,
+  maxProperties: 19
+};
+
+const comparisonScoreBreakdownSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    requirementMatch: {
+      type: 'object',
+      properties: {
+        matched: boundedTextArraySchema(50, 160),
+        missing: boundedTextArraySchema(50, 160),
+        score: { type: 'number', minimum: 0, maximum: 100 }
+      },
+      required: ['matched', 'missing', 'score'],
+      additionalProperties: false
+    },
+    skillOverlap: {
+      type: 'object',
+      properties: {
+        matched: boundedTextArraySchema(50, 160),
+        score: { type: 'number', minimum: 0, maximum: 100 }
+      },
+      required: ['matched', 'score'],
+      additionalProperties: false
+    },
+    experienceFit: {
+      type: 'object',
+      properties: {
+        evidence: boundedTextSchema(500),
+        score: { type: 'number', minimum: 0, maximum: 100 }
+      },
+      required: ['evidence', 'score'],
+      additionalProperties: false
+    }
+  },
+  required: ['requirementMatch', 'skillOverlap', 'experienceFit'],
+  additionalProperties: false
+};
+
+const workflowApplicationSummarySchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    applicationId: safeIdentifierSchema(),
+    candidateId: safeIdentifierSchema(),
+    jobId: safeIdentifierSchema(),
+    status: boundedTextSchema(80),
+    currentStage: boundedTextSchema(100),
+    blockers: boundedTextArraySchema(MAX_APPROVAL_SUMMARY_ITEMS, MAX_WORKFLOW_TEXT_LENGTH),
+    nextActions: boundedTextArraySchema(MAX_APPROVAL_SUMMARY_ITEMS, MAX_WORKFLOW_TEXT_LENGTH)
+  },
+  required: [
+    'applicationId',
+    'candidateId',
+    'jobId',
+    'status',
+    'currentStage',
+    'blockers',
+    'nextActions'
+  ],
+  additionalProperties: false
+};
+
+const traceSpanSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    spanId: safeIdentifierSchema(),
+    parentSpanId: safeIdentifierSchema(),
+    name: boundedTextSchema(160),
+    status: { type: 'string', enum: TRACE_SPAN_STATUSES },
+    startedAt: timestampSchema,
+    completedAt: timestampSchema,
+    durationMs: { type: 'number', minimum: 0 },
+    summary: {
+      ...jsonObjectSchema,
+      maxProperties: MAX_TRACE_SUMMARY_PROPERTIES
+    }
+  },
+  required: ['spanId', 'name', 'status', 'startedAt'],
+  additionalProperties: false,
+  maxProperties: 7
+};
+
+const capabilityDescriptorSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    name: boundedTextSchema(100),
+    description: boundedTextSchema(500),
+    visible: { type: 'boolean' },
+    allowed: { type: 'boolean' },
+    executionClass: { type: 'string', enum: OPERATION_EXECUTION_CLASSES },
+    readOnlyHint: { type: 'boolean' },
+    planable: { type: 'boolean' },
+    requiresApproval: { type: 'boolean' },
+    requiredCapability: boundedTextSchema(160),
+    resourceScope: boundedTextSchema(160),
+    schemaRef: boundedTextSchema(200),
+    redactedFields: boundedTextArraySchema(30, 160),
+    denialReason: { type: 'string', enum: CAPABILITY_DENIAL_REASONS }
+  },
+  required: [
+    'name',
+    'description',
+    'visible',
+    'allowed',
+    'executionClass',
+    'readOnlyHint',
+    'planable',
+    'requiresApproval',
+    'requiredCapability',
+    'resourceScope',
+    'redactedFields'
+  ],
+  additionalProperties: false,
+  maxProperties: 13
+};
+
+const capabilityManifestSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    manifestVersion: boundedTextSchema(80),
+    policyVersion: boundedTextSchema(PUBLIC_PROSPECT_POLICY_VERSION_MAX_LENGTH),
+    actor: actorContextSchema,
+    capabilities: {
+      type: 'array',
+      maxItems: MAX_CAPABILITIES,
+      items: capabilityDescriptorSchema
+    }
+  },
+  required: ['manifestVersion', 'policyVersion', 'actor', 'capabilities'],
+  additionalProperties: false
+};
+
+export interface OperationDescriptorOptions {
+  executionClass?: OperationExecutionClass;
+  directlyCallable?: boolean;
+  planable?: boolean;
+  approvalPolicy?: ApprovalPolicy;
+  requiredCapability?: string;
+}
+
 const operationDescriptor = <N extends OperationName>(
   name: N,
   description: string,
   readOnly: boolean,
   inputSchema: JsonSchema,
-  outputSchema: JsonSchema
-): OperationDescriptor<N> => ({
-  name,
-  description,
-  readOnly,
-  readOnlyHint: readOnly,
-  annotations: { readOnlyHint: readOnly },
-  implementationKey: OPERATION_IMPLEMENTATION_KEYS[name],
-  inputSchema,
-  outputSchema
-});
+  outputSchema: JsonSchema,
+  options: OperationDescriptorOptions = {}
+): OperationDescriptor<N> => {
+  const executionClass = options.executionClass ?? (readOnly ? 'read' : 'commit');
+  const directlyCallable = options.directlyCallable ?? true;
+  const planable = options.planable ?? false;
+  const approvalPolicy = options.approvalPolicy ?? 'none';
+
+  return {
+    name,
+    description,
+    readOnly,
+    readOnlyHint: readOnly,
+    annotations: {
+      readOnlyHint: readOnly,
+      executionClass,
+      requiresApproval: approvalPolicy !== 'none',
+      planable
+    },
+    executionClass,
+    directlyCallable,
+    planable,
+    approvalPolicy,
+    requiredCapability:
+      options.requiredCapability ?? `pipeline.operation.${name}`,
+    implementationKey: OPERATION_IMPLEMENTATION_KEYS[name],
+    inputSchema,
+    outputSchema
+  };
+};
 
 /**
  * The one canonical registry.  Both the server validator and WebMCP adapter
@@ -822,7 +1628,8 @@ export const OPERATION_REGISTRY = {
       required: ['query'],
       additionalProperties: false
     },
-    publicProspectSearchResultSchema
+    publicProspectSearchResultSchema,
+    { requiredCapability: 'prospect.search' }
   ),
 
   get_candidate_profile: operationDescriptor(
@@ -1336,6 +2143,554 @@ export const OPERATION_REGISTRY = {
       ],
       additionalProperties: false
     }
+  ),
+
+  plan_operation: operationDescriptor(
+    'plan_operation',
+    'Simulate a planable operation and create a reviewable approval card.',
+    false,
+    {
+      type: 'object',
+      properties: {
+        targetOperation: { type: 'string', enum: PLANABLE_OPERATION_NAMES },
+        input: jsonObjectSchema
+      },
+      required: ['targetOperation', 'input'],
+      additionalProperties: false,
+      maxProperties: 2
+    },
+    {
+      type: 'object',
+      properties: {
+        approvalId: safeIdentifierSchema(),
+        targetOperation: { type: 'string', enum: PLANABLE_OPERATION_NAMES },
+        proposedOutput: jsonObjectSchema,
+        changeSummary: boundedTextArraySchema(
+          MAX_APPROVAL_SUMMARY_ITEMS,
+          MAX_APPROVAL_TEXT_LENGTH
+        ),
+        warnings: boundedTextArraySchema(
+          MAX_APPROVAL_SUMMARY_ITEMS,
+          MAX_APPROVAL_TEXT_LENGTH
+        ),
+        blockers: boundedTextArraySchema(
+          MAX_APPROVAL_SUMMARY_ITEMS,
+          MAX_APPROVAL_TEXT_LENGTH
+        ),
+        baseRevision: { type: 'integer', minimum: 0 },
+        expiresAt: timestampSchema,
+        requiredApproval: { type: 'string', enum: APPROVAL_CARD_POLICIES },
+        requiredCapability: boundedTextSchema(160),
+        status: { type: 'string', const: 'pending' },
+        policyVersion: boundedTextSchema(160),
+        redactions: boundedTextArraySchema(MAX_APPROVAL_SUMMARY_ITEMS, 160)
+      },
+      required: [
+        'approvalId',
+        'targetOperation',
+        'proposedOutput',
+        'changeSummary',
+        'warnings',
+        'blockers',
+        'baseRevision',
+        'expiresAt',
+        'requiredApproval',
+        'requiredCapability',
+        'status',
+        'redactions'
+      ],
+      additionalProperties: false,
+      maxProperties: 13
+    },
+    {
+      executionClass: 'plan',
+      planable: false,
+      approvalPolicy: 'none',
+      requiredCapability: 'workflow.plan'
+    }
+  ),
+
+  get_approval_card: operationDescriptor(
+    'get_approval_card',
+    'Return an actor-scoped, redacted approval card.',
+    true,
+    {
+      type: 'object',
+      properties: { approvalId: safeIdentifierSchema() },
+      required: ['approvalId'],
+      additionalProperties: false
+    },
+    approvalCardSummarySchema,
+    { executionClass: 'read', requiredCapability: 'workflow.approval.read' }
+  ),
+
+  approve_operation_plan: operationDescriptor(
+    'approve_operation_plan',
+    'Approve a pending operation plan without applying its target mutation.',
+    false,
+    {
+      type: 'object',
+      properties: {
+        approvalId: safeIdentifierSchema(),
+        note: boundedTextSchema(MAX_APPROVAL_TEXT_LENGTH)
+      },
+      required: ['approvalId'],
+      additionalProperties: false,
+      maxProperties: 2
+    },
+    {
+      type: 'object',
+      properties: {
+        approvalId: safeIdentifierSchema(),
+        status: { type: 'string', const: 'approved' },
+        approvedBy: actorContextSchema,
+        approvedAt: timestampSchema,
+        note: boundedTextSchema(MAX_APPROVAL_TEXT_LENGTH),
+        policyVersion: boundedTextSchema(160)
+      },
+      required: ['approvalId', 'status', 'approvedBy', 'approvedAt'],
+      additionalProperties: false,
+      maxProperties: 6
+    },
+    {
+      executionClass: 'approval',
+      approvalPolicy: 'human',
+      requiredCapability: 'workflow.approval.approve'
+    }
+  ),
+
+  reject_operation_plan: operationDescriptor(
+    'reject_operation_plan',
+    'Reject a pending operation plan without applying its target mutation.',
+    false,
+    {
+      type: 'object',
+      properties: {
+        approvalId: safeIdentifierSchema(),
+        note: boundedTextSchema(MAX_APPROVAL_TEXT_LENGTH)
+      },
+      required: ['approvalId'],
+      additionalProperties: false,
+      maxProperties: 2
+    },
+    {
+      type: 'object',
+      properties: {
+        approvalId: safeIdentifierSchema(),
+        status: { type: 'string', const: 'rejected' },
+        rejectedBy: actorContextSchema,
+        rejectedAt: timestampSchema,
+        note: boundedTextSchema(MAX_APPROVAL_TEXT_LENGTH),
+        policyVersion: boundedTextSchema(160)
+      },
+      required: ['approvalId', 'status', 'rejectedBy', 'rejectedAt'],
+      additionalProperties: false,
+      maxProperties: 6
+    },
+    {
+      executionClass: 'approval',
+      approvalPolicy: 'human',
+      requiredCapability: 'workflow.approval.reject'
+    }
+  ),
+
+  commit_operation_plan: operationDescriptor(
+    'commit_operation_plan',
+    'Commit one approved and unexpired operation plan atomically.',
+    false,
+    {
+      type: 'object',
+      properties: { approvalId: safeIdentifierSchema() },
+      required: ['approvalId'],
+      additionalProperties: false
+    },
+    {
+      type: 'object',
+      properties: {
+        approvalId: safeIdentifierSchema(),
+        targetOperation: boundedTextSchema(100),
+        status: { type: 'string', const: 'committed' },
+        output: jsonObjectSchema,
+        committedAt: timestampSchema,
+        redactions: boundedTextArraySchema(MAX_APPROVAL_SUMMARY_ITEMS, 160)
+      },
+      required: [
+        'approvalId',
+        'targetOperation',
+        'status',
+        'output',
+        'committedAt'
+      ],
+      additionalProperties: false,
+      maxProperties: 6
+    },
+    {
+      executionClass: 'commit',
+      approvalPolicy: 'human',
+      requiredCapability: 'workflow.plan.commit'
+    }
+  ),
+
+  compare_candidates: operationDescriptor(
+    'compare_candidates',
+    'Compare two to five permitted candidates against one job with explainable scoring.',
+    true,
+    {
+      type: 'object',
+      properties: {
+        jobId: idSchema,
+        candidateIds: {
+          type: 'array',
+          minItems: 2,
+          maxItems: MAX_COMPARISON_CANDIDATES,
+          uniqueItems: true,
+          items: idSchema
+        }
+      },
+      required: ['jobId', 'candidateIds'],
+      additionalProperties: false
+    },
+    {
+      type: 'object',
+      properties: {
+        jobId: idSchema,
+        revision: { type: 'integer', minimum: 0 },
+        candidates: {
+          type: 'array',
+          minItems: 2,
+          maxItems: MAX_COMPARISON_CANDIDATES,
+          items: {
+            type: 'object',
+            properties: {
+              candidateId: idSchema,
+              name: requiredStringSchema,
+              rank: { type: 'integer', minimum: 1, maximum: MAX_COMPARISON_CANDIDATES },
+              totalScore: { type: 'number', minimum: 0, maximum: 100 },
+              scoreBreakdown: comparisonScoreBreakdownSchema,
+              rationale: boundedTextSchema(1000),
+              limitations: boundedTextArraySchema(MAX_APPROVAL_SUMMARY_ITEMS, 300)
+            },
+            required: [
+              'candidateId',
+              'name',
+              'rank',
+              'totalScore',
+              'scoreBreakdown',
+              'rationale',
+              'limitations'
+            ],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ['jobId', 'revision', 'candidates'],
+      additionalProperties: false
+    },
+    { executionClass: 'read', requiredCapability: 'candidate.compare' }
+  ),
+
+  get_recruiting_workflow_status: operationDescriptor(
+    'get_recruiting_workflow_status',
+    'Return a bounded, role-scoped recruiting workflow status snapshot.',
+    true,
+    {
+      type: 'object',
+      properties: {
+        jobId: idSchema,
+        applicationId: idSchema,
+        candidateId: idSchema,
+        detail: { type: 'string', enum: ['summary', 'full'] },
+        limit: { type: 'integer', minimum: 1, maximum: MAX_WORKFLOW_STATUS_ITEMS }
+      },
+      additionalProperties: false,
+      maxProperties: 5
+    },
+    {
+      type: 'object',
+      properties: {
+        revision: { type: 'integer', minimum: 0 },
+        scope: {
+          type: 'object',
+          properties: {
+            jobId: idSchema,
+            applicationId: idSchema,
+            candidateId: idSchema
+          },
+          additionalProperties: false,
+          maxProperties: 3
+        },
+        countsByApplicationStatus: {
+          type: 'object',
+          maxProperties: 12,
+          additionalProperties: { type: 'integer', minimum: 0 }
+        },
+        applications: {
+          type: 'array',
+          maxItems: MAX_WORKFLOW_STATUS_ITEMS,
+          items: workflowApplicationSummarySchema
+        },
+        pendingApprovals: {
+          type: 'array',
+          maxItems: MAX_APPROVAL_RECORDS,
+          items: approvalCardSummarySchema
+        },
+        blockers: boundedTextArraySchema(MAX_APPROVAL_SUMMARY_ITEMS, MAX_WORKFLOW_TEXT_LENGTH),
+        nextActions: boundedTextArraySchema(MAX_APPROVAL_SUMMARY_ITEMS, MAX_WORKFLOW_TEXT_LENGTH),
+        generatedAt: timestampSchema
+      },
+      required: [
+        'revision',
+        'scope',
+        'countsByApplicationStatus',
+        'applications',
+        'pendingApprovals',
+        'blockers',
+        'nextActions',
+        'generatedAt'
+      ],
+      additionalProperties: false
+    },
+    { executionClass: 'read', requiredCapability: 'workflow.status.read' }
+  ),
+
+  import_public_prospect: operationDescriptor(
+    'import_public_prospect',
+    'Import an explicitly consented public prospect with immutable provenance.',
+    false,
+    {
+      type: 'object',
+      properties: {
+        ...publicProspectSourceReferenceSchema.properties,
+        consent: consentSchema,
+        candidateProfile: candidateSubmittedProfileSchema
+      },
+      required: [...(publicProspectSourceReferenceSchema.required ?? []), 'consent'],
+      additionalProperties: false,
+      maxProperties: 10
+    },
+    {
+      type: 'object',
+      properties: {
+        sourcedProspect: sourcedProspectSchema,
+        candidateId: idSchema,
+        status: { type: 'string', enum: ['imported', 'linked'] }
+      },
+      required: ['sourcedProspect', 'status'],
+      additionalProperties: false
+    },
+    {
+      executionClass: 'commit',
+      planable: true,
+      approvalPolicy: 'consent_and_human',
+      requiredCapability: 'prospect.import'
+    }
+  ),
+
+  revoke_public_prospect_consent: operationDescriptor(
+    'revoke_public_prospect_consent',
+    'Withdraw public-prospect consent and apply the configured retention action.',
+    false,
+    {
+      type: 'object',
+      properties: {
+        sourcedProspectId: idSchema,
+        reason: boundedTextSchema(500)
+      },
+      required: ['sourcedProspectId'],
+      additionalProperties: false,
+      maxProperties: 2
+    },
+    {
+      type: 'object',
+      properties: {
+        sourcedProspectId: idSchema,
+        status: { type: 'string', const: 'withdrawn' },
+        withdrawnAt: timestampSchema,
+        retentionAction: boundedTextSchema(300)
+      },
+      required: [
+        'sourcedProspectId',
+        'status',
+        'withdrawnAt',
+        'retentionAction'
+      ],
+      additionalProperties: false
+    },
+    { executionClass: 'commit', approvalPolicy: 'human', requiredCapability: 'prospect.consent.revoke' }
+  ),
+
+  coordinate_interview_workflow: operationDescriptor(
+    'coordinate_interview_workflow',
+    'Coordinate deterministic interview proposal or booking workflow steps.',
+    false,
+    {
+      type: 'object',
+      properties: {
+        applicationId: idSchema,
+        action: { type: 'string', enum: ['propose_slots', 'book_slot'] },
+        slot: timestampSchema
+      },
+      required: ['applicationId', 'action'],
+      additionalProperties: false,
+      oneOf: [
+        {
+          type: 'object',
+          properties: { action: { type: 'string', const: 'propose_slots' } },
+          required: ['action']
+        },
+        {
+          type: 'object',
+          properties: {
+            action: { type: 'string', const: 'book_slot' },
+            slot: timestampSchema
+          },
+          required: ['action', 'slot']
+        }
+      ]
+    },
+    {
+      type: 'object',
+      properties: {
+        applicationId: idSchema,
+        stage: boundedTextSchema(100),
+        proposedSlots: {
+          type: 'array',
+          maxItems: 3,
+          items: {
+            type: 'object',
+            properties: { interviewId: idSchema, slot: timestampSchema },
+            required: ['interviewId', 'slot'],
+            additionalProperties: false
+          }
+        },
+        bookedInterview: {
+          type: ['object', 'null'] as const,
+          properties: { interviewId: idSchema, slot: timestampSchema },
+          required: ['interviewId', 'slot'],
+          additionalProperties: false
+        },
+        nextAction: { type: ['string', 'null'] as const, maxLength: 300 },
+        blockers: boundedTextArraySchema(MAX_APPROVAL_SUMMARY_ITEMS, MAX_WORKFLOW_TEXT_LENGTH)
+      },
+      required: [
+        'applicationId',
+        'stage',
+        'proposedSlots',
+        'bookedInterview',
+        'nextAction',
+        'blockers'
+      ],
+      additionalProperties: false
+    },
+    {
+      executionClass: 'commit',
+      planable: true,
+      approvalPolicy: 'human',
+      requiredCapability: 'interview.coordinate'
+    }
+  ),
+
+  coordinate_onboarding_workflow: operationDescriptor(
+    'coordinate_onboarding_workflow',
+    'Coordinate deterministic onboarding checklist initialization and task updates.',
+    false,
+    {
+      type: 'object',
+      properties: {
+        offerId: idSchema,
+        action: { type: 'string', enum: ['initialize_checklist', 'update_task'] },
+        taskId: idSchema,
+        status: { type: 'string', enum: ONBOARDING_TASK_STATUSES }
+      },
+      required: ['offerId', 'action'],
+      additionalProperties: false,
+      oneOf: [
+        {
+          type: 'object',
+          properties: { action: { type: 'string', const: 'initialize_checklist' } },
+          required: ['action']
+        },
+        {
+          type: 'object',
+          properties: {
+            action: { type: 'string', const: 'update_task' },
+            taskId: idSchema,
+            status: { type: 'string', enum: ONBOARDING_TASK_STATUSES }
+          },
+          required: ['action', 'taskId', 'status']
+        }
+      ]
+    },
+    {
+      type: 'object',
+      properties: {
+        offerId: idSchema,
+        changedTasks: {
+          type: 'array',
+          maxItems: MAX_WORKFLOW_STATUS_ITEMS,
+          items: {
+            type: 'object',
+            properties: {
+              taskId: idSchema,
+              taskName: boundedTextSchema(200),
+              dueDate: timestampSchema,
+              status: { type: 'string', enum: ONBOARDING_TASK_STATUSES }
+            },
+            required: ['taskId', 'taskName', 'dueDate', 'status'],
+            additionalProperties: false
+          }
+        },
+        backgroundCheckStatus: {
+          type: ['string', 'null'] as const,
+          enum: [...BACKGROUND_CHECK_STATUSES, null]
+        },
+        benefitsEnrolled: { type: 'boolean' },
+        taskCompletion: {
+          type: 'object',
+          properties: {
+            done: { type: 'integer', minimum: 0 },
+            total: { type: 'integer', minimum: 0 }
+          },
+          required: ['done', 'total'],
+          additionalProperties: false
+        },
+        completionPercentage: { type: 'number', minimum: 0, maximum: 100 },
+        blockers: boundedTextArraySchema(MAX_APPROVAL_SUMMARY_ITEMS, MAX_WORKFLOW_TEXT_LENGTH),
+        nextActions: boundedTextArraySchema(MAX_APPROVAL_SUMMARY_ITEMS, MAX_WORKFLOW_TEXT_LENGTH)
+      },
+      required: [
+        'offerId',
+        'changedTasks',
+        'backgroundCheckStatus',
+        'benefitsEnrolled',
+        'taskCompletion',
+        'completionPercentage',
+        'blockers',
+        'nextActions'
+      ],
+      additionalProperties: false
+    },
+    {
+      executionClass: 'commit',
+      planable: true,
+      approvalPolicy: 'human',
+      requiredCapability: 'onboarding.coordinate'
+    }
+  ),
+
+  discover_capabilities: operationDescriptor(
+    'discover_capabilities',
+    'Return the actor-scoped operation capability and permission manifest.',
+    true,
+    {
+      type: 'object',
+      properties: {},
+      required: [],
+      additionalProperties: false,
+      maxProperties: 0
+    },
+    capabilityManifestSchema,
+    { executionClass: 'read', requiredCapability: 'capabilities.discover' }
   )
 } as const satisfies OperationRegistry;
 
@@ -1365,28 +2720,68 @@ export function getOperationNames(): OperationName[] {
 export type OperationInput<N extends OperationName> = OperationInputMap[N];
 export type OperationOutput<N extends OperationName> = OperationOutputMap[N];
 
+/** A metadata-aware invocation envelope; metadata is transport context, not operation input. */
+export interface OperationInvocation<N extends OperationName = OperationName> {
+  name: N;
+  input: OperationInput<N>;
+  actor: ActorContext;
+  metadata?: InvocationMetadata;
+}
+
+export type Invocation = OperationInvocation;
+
 // Keep these imports type-visible to consumers that use the operation module
 // as their single contract entry point.
 export type {
+  ActivityLogEntry,
+  ActivityPhase,
+  ActorContext,
+  ApprovalCard,
+  ApprovalCardPolicy,
+  ApprovalCardRecord,
+  ApprovalCardStatus,
+  ApprovalCardSummary,
+  ApprovalId,
+  ApprovalPolicy,
   ApplicationRecord,
   BackgroundCheckStatus,
   CandidateRecord,
+  CapabilityDescriptor,
+  CapabilityManifest,
   CompensationBand,
+  CorrelationId,
   DateRange,
   ExperienceLevel,
+  GeneratedIdPlaceholder,
+  InvocationMetadata,
+  JobRequisition,
+  JsonObject,
+  OfferDecision,
+  OfferResponseStatus,
+  OperationExecutionClass,
+  PlanSelections,
+  ScorecardRecord,
+  ScorecardRecommendation,
+  SourcedProspectId,
+  SpanId,
+  StartDate,
+  TaskCompletion,
+  Timestamp,
+  TraceId,
+  TraceSpan,
+  TraceSpanStatus
+};
+
+export type {
+  CandidateSubmittedProfile,
   GitHubProspect,
   GitHubProspectAttribution,
   GitHubProspectCacheMetadata,
   GitHubProspectSearchInput,
   GitHubProspectSearchResult,
   NormalizedGitHubProspectSearchInput,
-  JobRequisition,
-  OfferDecision,
-  OfferResponseStatus,
-  PlanSelections,
-  ScorecardRecord,
-  ScorecardRecommendation,
-  StartDate,
-  TaskCompletion,
-  Timestamp
+  PublicProspectConsent,
+  PublicProspectFieldOrigin,
+  PublicProspectSourceReference,
+  SourcedProspectRecord
 };

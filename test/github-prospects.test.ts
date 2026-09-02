@@ -382,10 +382,10 @@ describe('GitHub prospect browser client and recruiter panel', () => {
     const markup = renderToStaticMarkup(
       createElement(GitHubProspectsPanel, { client })
     );
-    expect(markup).toContain('Public GitHub prospects');
+    expect(markup).toContain('public GitHub prospects');
     expect(markup).toContain('Search GitHub');
-    expect(markup).toContain('not a candidate database');
-    expect(markup).toContain('provide consent');
+    expect(markup).toContain('These are public prospects, not candidates.');
+    expect(markup).toContain('provide explicit consent');
     expect(markup).not.toContain('Import to candidate');
   });
 });

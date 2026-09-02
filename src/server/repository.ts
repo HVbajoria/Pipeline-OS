@@ -11,6 +11,10 @@
 import { randomUUID } from 'node:crypto';
 import type {
   ActivityLogEntry,
+  JsonObject,
+  LegacySharedState,
+  LegacySharedStateWithCatalogs,
+  SharedCatalogs,
   SharedState,
   SharedStateWithCatalogs,
   Timestamp
@@ -29,6 +33,59 @@ export interface Clock {
 /** Injectable identifier source used by operation handlers and tests. */
 export interface IdGenerator {
   next(prefix?: string): string;
+}
+
+/**
+ * Server-private idempotency record. The lookup key is a protected scope hash;
+ * neither the raw idempotency key nor this record is part of SharedState or a
+ * JSON projection. Durable hosts can implement this seam without changing the
+ * shared state contract.
+ */
+export interface InvocationLedgerEntry {
+  scopeHash: string;
+  requestFingerprint: string;
+  operationName: string;
+  status: 'success' | 'error';
+  responseOrError: JsonObject;
+  originalActivityId: string;
+  originalRevision: number;
+  correlationId: string;
+  traceId: string;
+  createdAt: Timestamp;
+  expiresAt: Timestamp;
+}
+
+export interface InvocationLedger {
+  get(scopeHash: string): InvocationLedgerEntry | undefined;
+  set(scopeHash: string, entry: InvocationLedgerEntry): void;
+  delete(scopeHash: string): void;
+  clear(): void;
+}
+
+/** Ephemeral in-memory ledger used by the deterministic demo repository. */
+export class InMemoryInvocationLedger implements InvocationLedger {
+  private readonly records = new Map<string, InvocationLedgerEntry>();
+
+  get(scopeHash: string): InvocationLedgerEntry | undefined {
+    const entry = this.records.get(scopeHash);
+    return entry === undefined ? undefined : deepClone(entry);
+  }
+
+  set(scopeHash: string, entry: InvocationLedgerEntry): void {
+    this.records.set(scopeHash, deepClone(entry));
+  }
+
+  delete(scopeHash: string): void {
+    this.records.delete(scopeHash);
+  }
+
+  clear(): void {
+    this.records.clear();
+  }
+
+  get size(): number {
+    return this.records.size;
+  }
 }
 
 export class SystemClock implements Clock {
@@ -55,15 +112,29 @@ export interface SharedStateRepositoryOptions {
   seed?: RepositorySeed;
   clock?: Clock;
   idGenerator?: IdGenerator;
+  /** Server-private idempotency storage; never included in read/snapshot. */
+  ledger?: InvocationLedger;
+  /** Additive explicit spelling for composition roots. */
+  invocationLedger?: InvocationLedger;
 }
 
-/** A state with catalogs, or a separate `{ state, catalogs }` seed bundle. */
+/** A pre-feature seed bundle accepted during the additive state migration. */
+export interface LegacySeedData {
+  state: LegacySharedState;
+  catalogs: SharedCatalogs;
+}
+
+/** A state with catalogs, or a separate state/catalog seed bundle. */
 export type RepositorySeed =
   | SharedState
   | SharedStateWithCatalogs
-  | SeedData;
+  | LegacySharedState
+  | LegacySharedStateWithCatalogs
+  | SeedData
+  | LegacySeedData;
 
-function isSeedBundle(value: unknown): value is SeedData {
+type RepositorySeedBundle = SeedData | LegacySeedData;
+function isSeedBundle(value: unknown): value is RepositorySeedBundle {
   return (
     typeof value === 'object' &&
     value !== null &&
@@ -77,7 +148,9 @@ function isRepositoryOptions(value: unknown): value is SharedStateRepositoryOpti
   return (
     'seed' in value ||
     'clock' in value ||
-    'idGenerator' in value
+    'idGenerator' in value ||
+    'ledger' in value ||
+    'invocationLedger' in value
   );
 }
 
@@ -144,22 +217,26 @@ export function deepClone<T>(value: T): T {
   return clone(value) as T;
 }
 
-function normalizeSeed(seed: RepositorySeed): SharedStateWithCatalogs {
-  if (isSeedBundle(seed)) {
-    return {
-      ...deepClone(seed.state),
-      catalogs: deepClone(seed.catalogs)
-    };
-  }
+function mapFromSeed<K, V>(source: object, key: string): Map<K, V> {
+  const value = (source as Record<string, unknown>)[key];
+  return value instanceof Map
+    ? deepClone(value) as Map<K, V>
+    : new Map<K, V>();
+}
 
-  const state = deepClone(seed);
-  const catalogs =
-    'catalogs' in state && state.catalogs
+function normalizeSeed(seed: RepositorySeed): SharedStateWithCatalogs {
+  const source = isSeedBundle(seed) ? seed.state : seed;
+  const state = deepClone(source) as SharedState | LegacySharedState;
+  const catalogs = isSeedBundle(seed)
+    ? deepClone(seed.catalogs)
+    : 'catalogs' in state && state.catalogs
       ? deepClone(state.catalogs)
       : createSeedCatalogs();
 
   return {
     ...state,
+    approvalCards: mapFromSeed(state, 'approvalCards'),
+    sourcedProspects: mapFromSeed(state, 'sourcedProspects'),
     catalogs
   } as SharedStateWithCatalogs;
 }
@@ -186,6 +263,13 @@ export class SharedStateRepository {
 
   readonly clock: Clock;
   readonly idGenerator: IdGenerator;
+  /** Server-private ledger dependency; it is deliberately absent from state. */
+  readonly invocationLedger: InvocationLedger;
+
+  /** Compatibility alias for hosts that call the dependency simply `ledger`. */
+  get ledger(): InvocationLedger {
+    return this.invocationLedger;
+  }
 
   constructor(
     seed?: RepositorySeed,
@@ -222,6 +306,8 @@ export class SharedStateRepository {
     this.state = normalizeSeed(seed);
     this.clock = options.clock ?? new SystemClock();
     this.idGenerator = options.idGenerator ?? new UuidIdGenerator();
+    this.invocationLedger =
+      options.invocationLedger ?? options.ledger ?? new InMemoryInvocationLedger();
   }
 
   /** Return an isolated copy of the current map-backed state. */
@@ -329,6 +415,10 @@ export class SharedStateRepository {
    */
   reset(seed: RepositorySeed = createSeed()): SharedStateWithCatalogs {
     const next = normalizeSeed(seed);
+    // Demo approval/provenance and idempotency records are ephemeral. A
+    // durable host may supply a ledger with its own retention policy, but the
+    // in-memory seam is cleared with reset so retries cannot cross demo data.
+    this.invocationLedger.clear();
     this.commit(next);
     return this.read();
   }

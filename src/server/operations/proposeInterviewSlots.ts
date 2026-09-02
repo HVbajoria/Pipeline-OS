@@ -1,10 +1,7 @@
 /** Mutation handler for materializing the best common interview slots. */
 
 import { notFoundError } from '../../shared/errors';
-import { selectTopThreeSlots } from '../../shared/domain/scheduling';
-import type {
-  InterviewRecord
-} from '../../shared/models';
+import { materializeInterviewProposals } from '../../shared/domain/interviewWorkflow';
 import type {
   ProposeInterviewSlotsOutput
 } from '../../shared/operations';
@@ -45,29 +42,21 @@ export const proposeInterviewSlots: OperationHandler<
     });
   }
 
-  const commonSlots = selectTopThreeSlots(
-    commonFreeSlotsForPanelCalendars(context.state, panel)
+  const result = materializeInterviewProposals(
+    application,
+    panel,
+    commonFreeSlotsForPanelCalendars(context.state, panel),
+    context.state.interviews,
+    () => context.nextId('interview'),
+    { reuseExisting: false }
   );
-  const proposedSlots: ProposeInterviewSlotsOutput['proposedSlots'] = [];
 
-  for (const slot of commonSlots) {
-    let interviewId = context.nextId('interview');
-    while (context.state.interviews.has(interviewId)) {
-      interviewId = context.nextId('interview');
-    }
-
-    const interview: InterviewRecord = {
-      id: interviewId,
-      applicationId: application.id,
-      panelId: panel.id,
-      slot,
-      status: 'proposed'
-    };
-    context.state.interviews.set(interviewId, interview);
-    proposedSlots.push({ interviewId, slot });
-  }
-
-  return { proposedSlots };
+  return {
+    proposedSlots: result.records.map(({ id: interviewId, slot }) => ({
+      interviewId,
+      slot
+    }))
+  };
 };
 
 export const proposeInterviewSlotsHandler = proposeInterviewSlots;

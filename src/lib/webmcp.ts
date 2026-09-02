@@ -3,6 +3,8 @@ import {
   OPERATION_NAMES,
   OPERATION_REGISTRY,
   type JsonSchema,
+  type OperationAnnotations,
+  type OperationDescriptor,
   type OperationInput,
   type OperationName,
   type OperationOutput
@@ -21,7 +23,7 @@ export interface WebMcpNativeTool {
   description: string;
   inputSchema: JsonSchema;
   execute: (input: unknown, signal?: AbortSignal) => Promise<unknown>;
-  annotations: { readOnlyHint: boolean };
+  annotations: OperationAnnotations;
 }
 
 export interface WebMcpFallbackTool {
@@ -29,7 +31,7 @@ export interface WebMcpFallbackTool {
   description: string;
   schema: JsonSchema;
   handler: (input: unknown, signal?: AbortSignal) => Promise<unknown>;
-  annotations: { readOnlyHint: boolean };
+  annotations: OperationAnnotations;
 }
 
 export interface WebMcpRegisteredTool {
@@ -38,7 +40,10 @@ export interface WebMcpRegisteredTool {
   inputSchema: JsonSchema;
   /** Compatibility alias used by the development registry/documentation. */
   schema: JsonSchema;
-  annotations: { readOnlyHint: boolean };
+  annotations: OperationAnnotations;
+  /** Safe registry metadata used by permission-aware docs/hosts. */
+  requiredCapability: string;
+  approvalPolicy: OperationDescriptor['approvalPolicy'];
   execute: (input: unknown, signal?: AbortSignal) => Promise<unknown>;
 }
 
@@ -178,15 +183,18 @@ export function registerAllTools(
       client.invoke(
         name,
         input as OperationInput<typeof name>,
-        agent,
-        signal
+        { actor: agent, signal }
       );
     const tool: WebMcpRegisteredTool = {
       name,
       description: descriptor.description,
       inputSchema: descriptor.inputSchema,
       schema: descriptor.inputSchema,
+      // Preserve the complete canonical annotation object for native,
+      // navigator-polyfill, and development fallback registrations.
       annotations: { ...descriptor.annotations },
+      requiredCapability: descriptor.requiredCapability,
+      approvalPolicy: descriptor.approvalPolicy,
       execute
     };
     registeredTools.push(tool);
