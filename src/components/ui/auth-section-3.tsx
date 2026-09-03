@@ -4,11 +4,16 @@ import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import harshavardhanImage from '../../assets/Harshavardhan_Bajoria.jpg';
 import { FlutedGlass } from '@paper-design/shaders-react';
-import { Eye, EyeOff, Mail, UserPlus } from 'lucide-react';
+import { ChevronDown, Eye, EyeOff, Mail, UserPlus } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
 import PipelineLogo from '../PipelineLogo';
 
 export type AuthSectionMode = 'signin' | 'register';
+
+export interface AuthRoleOption {
+  value: string;
+  label: string;
+}
 
 export interface AuthSectionThreeProps {
   mode: AuthSectionMode;
@@ -16,12 +21,15 @@ export interface AuthSectionThreeProps {
   lastName: string;
   email: string;
   password: string;
+  role: string;
+  roleOptions: readonly AuthRoleOption[];
   busy: boolean;
   error: string | null;
   onFirstNameChange: (value: string) => void;
   onLastNameChange: (value: string) => void;
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
+  onRoleChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }
 
@@ -31,12 +39,15 @@ export default function AuthSectionThree({
   lastName,
   email,
   password,
+  role,
+  roleOptions,
   busy,
   error,
   onFirstNameChange,
   onLastNameChange,
   onEmailChange,
   onPasswordChange,
+  onRoleChange,
   onSubmit
 }: AuthSectionThreeProps) {
   const reduceMotion = useReducedMotion();
@@ -104,6 +115,30 @@ export default function AuthSectionThree({
                 onChange={onPasswordChange}
                 disabled={busy}
               />
+
+              {mode === 'register' && (
+                <div className="w-full space-y-2 text-left">
+                  <label htmlFor="auth-role" className="block text-xs font-semibold uppercase tracking-wide text-white/55">
+                    Role
+                  </label>
+                  <div className="group relative flex h-12 items-center rounded-xl border border-white/12 bg-white/[0.04] px-4 transition-colors focus-within:border-white/50 focus-within:bg-white/[0.06] focus-within:ring-2 focus-within:ring-white/15">
+                    <select
+                      id="auth-role"
+                      value={role}
+                      onChange={(event) => onRoleChange(event.target.value)}
+                      disabled={busy}
+                      className="h-full w-full appearance-none bg-transparent text-sm text-white outline-none disabled:cursor-wait disabled:opacity-60 [&>option]:bg-[#0a0a0c] [&>option]:text-white"
+                    >
+                      {roleOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none ml-2 size-4 shrink-0 text-white/45" aria-hidden="true" />
+                  </div>
+                </div>
+              )}
 
               {mode === 'register' && (
                 <div className="space-y-3 pt-2 text-xs leading-5 text-white/40 sm:text-[13px]">

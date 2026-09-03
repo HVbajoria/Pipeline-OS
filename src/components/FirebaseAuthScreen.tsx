@@ -1,6 +1,22 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import AuthSectionThree, { type AuthSectionMode } from './ui/auth-section-3';
-import { registerWithEmail, signInWithEmail } from '../client/firebaseAuth';
+import AuthSectionThree, { type AuthRoleOption, type AuthSectionMode } from './ui/auth-section-3';
+import {
+  registerWithEmail,
+  signInWithEmail,
+  SELF_SELECTABLE_ROLES,
+  type SelfSelectableRole
+} from '../client/firebaseAuth';
+
+const ROLE_OPTIONS: readonly AuthRoleOption[] = [
+  { value: 'candidate', label: 'Candidate' },
+  { value: 'recruiter', label: 'Recruiter' },
+  { value: 'hiring-manager', label: 'Hiring manager' },
+  { value: 'interviewer', label: 'Interviewer' }
+];
+
+function isSelfSelectableRole(value: string): value is SelfSelectableRole {
+  return (SELF_SELECTABLE_ROLES as readonly string[]).includes(value);
+}
 
 export function friendlyAuthError(error: unknown): string {
   const code =
@@ -37,6 +53,7 @@ export default function FirebaseAuthScreen({ mode, initialError }: FirebaseAuthS
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [role, setRole] = useState<string>('candidate');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(initialError ?? null);
 
@@ -57,7 +74,8 @@ export default function FirebaseAuthScreen({ mode, initialError }: FirebaseAuthS
     try {
       if (mode === 'register') {
         const displayName = [firstName.trim(), lastName.trim()].filter(Boolean).join(' ');
-        await registerWithEmail(email.trim(), password, displayName);
+        const selectedRole = isSelfSelectableRole(role) ? role : undefined;
+        await registerWithEmail(email.trim(), password, displayName, selectedRole);
       } else {
         await signInWithEmail(email.trim(), password);
       }
@@ -75,12 +93,15 @@ export default function FirebaseAuthScreen({ mode, initialError }: FirebaseAuthS
       lastName={lastName}
       email={email}
       password={password}
+      role={role}
+      roleOptions={ROLE_OPTIONS}
       busy={busy}
       error={error}
       onFirstNameChange={setFirstName}
       onLastNameChange={setLastName}
       onEmailChange={setEmail}
       onPasswordChange={setPassword}
+      onRoleChange={setRole}
       onSubmit={(event) => void submit(event)}
     />
   );

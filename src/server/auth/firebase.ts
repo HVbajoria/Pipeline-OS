@@ -103,20 +103,48 @@ function claimResourceIds(
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
+/**
+ * Roles a brand-new user may self-select at sign-up. Privileged roles (admin,
+ * system, agent) are intentionally excluded: they can only be granted through
+ * verified token claims set server-side, never from a browser request body.
+ */
+const SELF_SELECTABLE_ROLES = new Set<AuthorizationRole>([
+  'candidate',
+  'recruiter',
+  'hiring-manager',
+  'interviewer'
+]);
+
+function requestedRole(request: Request): AuthorizationRole | undefined {
+  const body = request.body as { requestedRole?: unknown } | undefined;
+  const value = body?.requestedRole;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return SELF_SELECTABLE_ROLES.has(trimmed as AuthorizationRole)
+    ? (trimmed as AuthorizationRole)
+    : undefined;
+}
+
 function firebaseRoles(
   token: DecodedIdToken,
-  fallback: AuthorizationRole | undefined
+  fallback: AuthorizationRole | undefined,
+  requested: AuthorizationRole | undefined
 ): AuthorizationRole[] {
   const known = new Set<string>(AUTHORIZATION_ROLES as readonly string[]);
   known.add('hiring-manager');
   const claimed = claimStringArray(token, 'roles', 'role').filter((role) => known.has(role));
+  // A verified token claim is authoritative and always wins over any
+  // browser-supplied role. Only when the account has no role claim do we honor
+  // a self-selected role from sign-up, and only from the safe allowlist.
   if (claimed.length > 0) return [...new Set(claimed)] as AuthorizationRole[];
+  if (requested !== undefined) return [requested];
   return fallback === undefined ? [] : [fallback];
 }
 
 function claimsFromFirebaseToken(
   token: DecodedIdToken,
-  options: FirebaseAuthOptions
+  options: FirebaseAuthOptions,
+  requested: AuthorizationRole | undefined
 ): VerifiedIdentityClaims {
   const tenantId =
     claimString(token, 'tenantId', 'tenant', 'org', 'tenant_id') ??
@@ -125,7 +153,7 @@ function claimsFromFirebaseToken(
     throw new Error('Firebase user is missing a tenant claim');
   }
 
-  const roles = firebaseRoles(token, options.defaultRole);
+  const roles = firebaseRoles(token, options.defaultRole, requested);
   if (roles.length === 0) {
     throw new Error('Firebase user is missing an authorized role claim');
   }
@@ -198,7 +226,7 @@ export function installFirebaseAuthRoutes(
         return;
       }
       const decoded = await verifyIdToken(token, true);
-      const claims = claimsFromFirebaseToken(decoded, options);
+      const claims = claimsFromFirebaseToken(decoded, options, requestedRole(request));
       const now = Date.now();
       const session: WebSession = {
         sessionId: randomUUID(),

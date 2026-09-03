@@ -123,8 +123,12 @@ export function signInWithEmail(email: string, password: string): Promise<User> 
 export async function registerWithEmail(
   email: string,
   password: string,
-  displayName?: string
+  displayName?: string,
+  role?: SelfSelectableRole
 ): Promise<User> {
+  // Remember the requested role before creating the account so the session
+  // exchange triggered by the auth observer carries it to the server.
+  if (role !== undefined) rememberRequestedRole(role);
   const credential = await createUserWithEmailAndPassword(firebaseAuth(), email, password);
   const name = displayName?.trim();
   if (name !== undefined && name.length > 0) {
@@ -152,15 +156,58 @@ function errorFromResponse(body: unknown, fallback: string): Error {
   return new Error(fallback);
 }
 
+/**
+ * Roles a brand-new user is allowed to self-select at sign-up. Privileged
+ * roles (admin, system, agent) are intentionally excluded and can only be
+ * granted server-side through verified token claims.
+ */
+export const SELF_SELECTABLE_ROLES = [
+  'candidate',
+  'recruiter',
+  'hiring-manager',
+  'interviewer'
+] as const;
+
+export type SelfSelectableRole = (typeof SELF_SELECTABLE_ROLES)[number];
+
+const requestedRoleKey = 'pipelineos:requested-role';
+
+export function rememberRequestedRole(role: SelfSelectableRole): void {
+  try {
+    window.sessionStorage.setItem(requestedRoleKey, role);
+  } catch {
+    // Storage can be unavailable in privacy-restricted contexts; the server
+    // simply falls back to its default role in that case.
+  }
+}
+
+function claimRequestedRole(): SelfSelectableRole | undefined {
+  try {
+    const value = window.sessionStorage.getItem(requestedRoleKey);
+    if (value === null) return undefined;
+    // Consume the marker so it only influences the first session exchange
+    // that follows the registration it was set for.
+    window.sessionStorage.removeItem(requestedRoleKey);
+    return (SELF_SELECTABLE_ROLES as readonly string[]).includes(value)
+      ? (value as SelfSelectableRole)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function establishServerSession(user: User): Promise<FirebaseSession> {
   const token = await user.getIdToken();
+  const requestedRole = claimRequestedRole();
   const response = await fetch('/auth/firebase/session', {
     method: 'POST',
     credentials: 'include',
     headers: {
       accept: 'application/json',
+      'content-type': 'application/json',
       authorization: `Bearer ${token}`
-    }
+    },
+    body: JSON.stringify(requestedRole === undefined ? {} : { requestedRole })
   });
   const body = await parseResponseBody(response);
   if (!response.ok || typeof body !== 'object' || body === null || !('authenticated' in body)) {

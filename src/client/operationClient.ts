@@ -315,12 +315,18 @@ export class OperationClient {
     }
 
     // Refresh for both success and failure so failed activity entries are
-    // visible to every open view. Preserve the operation error if both calls
-    // fail; a successful operation cannot resolve with stale client state.
+    // visible to every open view. The refresh is a best-effort convenience:
+    // when the operation itself succeeded, a failed state refresh must NOT be
+    // promoted into a thrown error, or a valid result (e.g. an FAQ answer that
+    // was already computed and returned by the server) would surface as a
+    // spurious "Internal server error" toast. Only when the operation itself
+    // failed do we fall back to the refresh error so a failure still surfaces.
     try {
       await this.refreshState(resolvedActor);
     } catch (refreshError) {
-      if (failure === undefined) failure = PipelineError.from(refreshError);
+      if (failure === undefined && result === undefined) {
+        failure = PipelineError.from(refreshError);
+      }
     }
 
     if (failure !== undefined) throw failure;
