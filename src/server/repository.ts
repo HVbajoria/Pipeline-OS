@@ -60,6 +60,12 @@ export interface InvocationLedger {
   set(scopeHash: string, entry: InvocationLedgerEntry): void;
   delete(scopeHash: string): void;
   clear(): void;
+  /**
+   * Optional scheduled cleanup. Remove every entry whose `expiresAt` is at or
+   * before `nowIso` and return how many were pruned. Ledgers that only prune
+   * lazily on read may omit this; the maintenance sweep calls it when present.
+   */
+  prune?(nowIso: Timestamp): number;
 }
 
 /** Ephemeral in-memory ledger used by the deterministic demo repository. */
@@ -81,6 +87,21 @@ export class InMemoryInvocationLedger implements InvocationLedger {
 
   clear(): void {
     this.records.clear();
+  }
+
+  /** Remove every entry expired at or before `nowIso`; returns the count. */
+  prune(nowIso: Timestamp): number {
+    const nowMillis = Date.parse(nowIso);
+    if (!Number.isFinite(nowMillis)) return 0;
+    let pruned = 0;
+    for (const [scopeHash, entry] of this.records.entries()) {
+      const expiresAt = Date.parse(entry.expiresAt);
+      if (Number.isFinite(expiresAt) && expiresAt <= nowMillis) {
+        this.records.delete(scopeHash);
+        pruned += 1;
+      }
+    }
+    return pruned;
   }
 
   get size(): number {
@@ -423,6 +444,39 @@ export class SharedStateRepository {
     return this.read();
   }
 
+  /**
+   * Expire approval cards whose deadline has passed. Cards are otherwise only
+   * transitioned lazily when an operation touches them, which leaks `pending`/
+   * `approved` cards in a long-running durable store. The scheduled maintenance
+   * sweep calls this so terminal state is reached even without further traffic.
+   *
+   * `nowIso` defaults to the injected clock. Returns the ids that were expired;
+   * when none change, no revision is committed.
+   */
+  sweepExpiredApprovalCards(nowIso: Timestamp = this.clock.now()): string[] {
+    const nowMillis = Date.parse(nowIso);
+    if (!Number.isFinite(nowMillis)) return [];
+    const expiredIds: string[] = [];
+    for (const [id, card] of this.state.approvalCards.entries()) {
+      const expiresAt = Date.parse(card.expiresAt);
+      if (
+        (card.status === 'pending' || card.status === 'approved') &&
+        Number.isFinite(expiresAt) &&
+        nowMillis >= expiresAt
+      ) {
+        expiredIds.push(id);
+      }
+    }
+    if (expiredIds.length === 0) return [];
+    this.transact((draft) => {
+      for (const id of expiredIds) {
+        const card = draft.approvalCards.get(id);
+        if (card !== undefined) card.status = 'expired';
+      }
+    });
+    return expiredIds;
+  }
+
   /** Subscribe to committed snapshots; returns an idempotent unsubscribe. */
   subscribe(listener: RepositoryListener): () => void {
     this.listeners.add(listener);
@@ -431,9 +485,20 @@ export class SharedStateRepository {
     };
   }
 
-  private commit(next: SharedStateWithCatalogs): void {
+  protected commit(next: SharedStateWithCatalogs): void {
     const committed = deepClone(next);
     committed.revision = this.state.revision + 1;
+    this.applyCommittedState(committed);
+  }
+
+  /**
+   * Replace the authoritative state with an already-finalized snapshot (its
+   * `revision` is used as-is) and notify subscribers. The base `commit`
+   * increments the revision before delegating here; a durable subclass can
+   * also use this to adopt a snapshot produced by another instance without
+   * minting a new revision.
+   */
+  protected applyCommittedState(committed: SharedStateWithCatalogs): void {
     this.state = committed;
 
     const snapshot = this.read();

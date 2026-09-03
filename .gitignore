@@ -7,3 +7,8 @@ coverage/
 .env*
 !.env.example
 *.kiro
+
+# Service-account keys and other local secrets. Never commit these.
+secrets/
+*-firebase-adminsdk-*.json
+*service-account*.json

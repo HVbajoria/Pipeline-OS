@@ -1,0 +1,32 @@
+# Keep the build context small and never ship local artifacts or secrets.
+node_modules
+dist
+build
+coverage
+
+# Secrets and local env — provided at deploy time via Secret Manager / env vars.
+.env
+.env.*
+!.env.example
+secrets/
+*-firebase-adminsdk-*.json
+*service-account*.json
+
+# VCS, tooling, and editor cruft
+.git
+.gitignore
+*.log
+.DS_Store
+*.kiro
+.kiro
+
+# Tests are not needed in the image
+test
+**/*.test.ts
+**/*.test.tsx
+
+# Docs / assets not required at runtime
+README.md
+prd.md
+DEPLOY.md
+assets

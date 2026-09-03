@@ -43,11 +43,15 @@ import {
   MCP_TOOL_GUIDANCE,
   type McpConfirmationMode
 } from './mcpDescriptions';
+import { APP_NAME, APP_VERSION } from './version';
 
-/** Server identity advertised to MCP clients during `initialize`. */
+/**
+ * Server identity advertised to MCP clients during `initialize`. Sourced from
+ * package.json (via version.ts) so it never drifts from the release version.
+ */
 export const MCP_SERVER_INFO = {
-  name: 'pipelineos',
-  version: '1.0.0'
+  name: APP_NAME,
+  version: APP_VERSION
 } as const;
 
 /**
@@ -77,6 +81,12 @@ export interface McpEndpointOptions {
   resolveIdentity: (request: Request) => Promise<RequestIdentity>;
   /** Environment forwarded to the operation invocation context. */
   environment?: OperationInvocationContext['environment'];
+  /**
+   * Optional observability hook fired once per `tools/call`, after the call
+   * settles, with the tool name and outcome. Used to count MCP tool-call
+   * volume without coupling the transport to a metrics implementation.
+   */
+  onToolCall?: (tool: string, outcome: 'success' | 'error') => void;
 }
 
 /** Resolve the confirmation mode for a descriptor from its approval policy. */
@@ -201,6 +211,7 @@ export function createMcpServer(
     const { name, arguments: rawArgs } = callRequest.params;
 
     if (!isOperationName(name)) {
+      options.onToolCall?.(String(name), 'error');
       return errorResult(
         new PipelineError({
           code: 'NOT_FOUND_ERROR',
@@ -241,10 +252,12 @@ export function createMcpServer(
         },
         context
       );
+      options.onToolCall?.(name, 'success');
       return successResult(output);
     } catch (error) {
       // Surface domain/authorization failures as structured tool errors rather
       // than transport-level exceptions, so the model can reason about them.
+      options.onToolCall?.(name, 'error');
       return errorResult(error);
     }
   });

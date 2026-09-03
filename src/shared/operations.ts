@@ -767,6 +767,14 @@ export interface OperationDescriptor<N extends OperationName = OperationName> {
   directlyCallable: boolean;
   planable: boolean;
   approvalPolicy: ApprovalPolicy;
+  /**
+   * Whether an autonomous `agent` principal (for example an LLM host such as a
+   * ChatGPT connector) may execute this operation directly. `'forbidden'`
+   * means the mutation is irreversible enough that an agent must instead go
+   * through the human-in-the-loop plan → approve → commit lifecycle; human
+   * principals are unaffected. Defaults to `'allowed'`.
+   */
+  agentDirectExecution: 'allowed' | 'forbidden';
   requiredCapability: string;
   implementationKey: OperationImplementationKey;
   inputSchema: JsonSchema;
@@ -1500,6 +1508,8 @@ export interface OperationDescriptorOptions {
   directlyCallable?: boolean;
   planable?: boolean;
   approvalPolicy?: ApprovalPolicy;
+  /** See `OperationDescriptor.agentDirectExecution`. Defaults to `'allowed'`. */
+  agentDirectExecution?: 'allowed' | 'forbidden';
   requiredCapability?: string;
 }
 
@@ -1515,6 +1525,7 @@ const operationDescriptor = <N extends OperationName>(
   const directlyCallable = options.directlyCallable ?? true;
   const planable = options.planable ?? false;
   const approvalPolicy = options.approvalPolicy ?? 'none';
+  const agentDirectExecution = options.agentDirectExecution ?? 'allowed';
 
   return {
     name,
@@ -1531,6 +1542,7 @@ const operationDescriptor = <N extends OperationName>(
     directlyCallable,
     planable,
     approvalPolicy,
+    agentDirectExecution,
     requiredCapability:
       options.requiredCapability ?? `pipeline.operation.${name}`,
     implementationKey: OPERATION_IMPLEMENTATION_KEYS[name],
@@ -1969,7 +1981,11 @@ export const OPERATION_REGISTRY = {
       },
       required: ['offerId', 'status'],
       additionalProperties: false
-    }
+    },
+    // Sending an offer is an outbound, irreversible action. An autonomous
+    // agent must not do it directly; a human recruiter performs it (or an
+    // agent proposes it through plan/approve/commit).
+    { agentDirectExecution: 'forbidden' }
   ),
 
   respond_to_offer: operationDescriptor(
@@ -2020,7 +2036,10 @@ export const OPERATION_REGISTRY = {
       },
       required: ['offerId', 'status'],
       additionalProperties: false
-    }
+    },
+    // Accepting/declining/countering an offer is an irreversible commitment.
+    // A human candidate performs it; an autonomous agent may not.
+    { agentDirectExecution: 'forbidden' }
   ),
 
   initiate_background_check: operationDescriptor(
@@ -2482,6 +2501,7 @@ export const OPERATION_REGISTRY = {
       executionClass: 'commit',
       planable: true,
       approvalPolicy: 'consent_and_human',
+      agentDirectExecution: 'forbidden',
       requiredCapability: 'prospect.import'
     }
   ),

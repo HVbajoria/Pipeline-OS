@@ -87,6 +87,17 @@ import {
 } from './prospects';
 import { createMcpRequestHandler } from './mcp';
 import {
+  installGlobalSecurity,
+  operationRateLimiter,
+  resolveBodyLimit,
+  type SecurityOptions
+} from './security';
+import {
+  getMetricsRegistry,
+  subscribeMetricsToRepository,
+  type MetricsRegistry
+} from './observability/metrics';
+import {
   type AuthProvider,
   mcpAuthOptionsFromProvider,
   createProtectedResourceMetadataHandler,
@@ -180,6 +191,17 @@ export interface PipelineApiOptions extends OperationServiceOptions {
    * non-production, fail-closed in production).
    */
   authProvider?: AuthProvider;
+  /**
+   * Abuse-protection configuration: security headers, CORS allowlist, request
+   * body cap, and rate limiting. Every field has a safe default and can also
+   * be set through environment variables (see `src/server/security.ts`).
+   */
+  security?: SecurityOptions;
+  /**
+   * Metrics registry backing `/metrics`. Defaults to the process-wide shared
+   * registry. Inject a dedicated registry for isolated tests.
+   */
+  metrics?: MetricsRegistry;
 }
 
 export interface PipelineApi {
@@ -1518,6 +1540,14 @@ export function createPipelineApi(options: PipelineApiOptions = {}): PipelineApi
     options.publicJobs ?? new PublicJobsCoordinator(options.publicJobsOptions);
   const app = express();
 
+  // Trust the first proxy hop so req.ip reflects the real client behind a load
+  // balancer / Cloud Run, which is required for correct IP-based rate limiting.
+  app.set('trust proxy', 1);
+
+  // Abuse protection first: security headers (helmet) and the CORS allowlist
+  // run before any route so every response — including errors — is hardened.
+  installGlobalSecurity(app, options.security);
+
   // Install eligibility headers before API routes and before server.ts mounts
   // Vite or production static middleware, so every HTML response inherits the
   // same explicit, same-origin WebMCP policy.
@@ -1527,7 +1557,49 @@ export function createPipelineApi(options: PipelineApiOptions = {}): PipelineApi
     next();
   });
 
-  app.use(express.json());
+  // Cap request body size so a hostile or runaway client cannot exhaust memory.
+  app.use(express.json({ limit: resolveBodyLimit(options.security) }));
+
+  // Operational endpoints for container orchestration and scraping. They are
+  // intentionally unauthenticated and NOT rate limited (mounted before the
+  // limiter) so a health probe or metrics scraper is never throttled or
+  // blocked. /metrics can be disabled with METRICS_ENABLED=false.
+  const metrics = options.metrics ?? getMetricsRegistry();
+  // Feed the registry from the activity log: every operation (success, failure,
+  // or replay) appends exactly one entry carrying operation/phase/actor, the
+  // structured error code on failure, and a root trace span with a duration.
+  subscribeMetricsToRepository(metrics, repository);
+  app.get('/health', (_request, response) => {
+    response.json({ status: 'ok', uptimeSeconds: process.uptime() });
+  });
+  app.get('/ready', (_request, response) => {
+    // Readiness verifies the authoritative store is actually reachable/readable.
+    // For the durable Firestore repository this exercises the hydrated snapshot;
+    // for in-memory it confirms the revision is available.
+    try {
+      const revision = repository.getRevision();
+      response.json({ status: 'ready', revision });
+    } catch (error) {
+      response
+        .status(503)
+        .json({ status: 'unavailable', reason: (error as Error).message });
+    }
+  });
+  if (process.env.METRICS_ENABLED !== 'false') {
+    app.get('/metrics', (_request, response) => {
+      response.setHeader('Content-Type', metrics.contentType);
+      response.send(metrics.render());
+    });
+  }
+
+  // Per-principal (subject/tenant) rate limiter with an IP fallback, scoped to
+  // the two surfaces an LLM host can drive: the operation API and /mcp. Static
+  // assets, SSE, and discovery are intentionally out of scope.
+  const rateLimiter = operationRateLimiter(options.security);
+  if (rateLimiter !== undefined) {
+    app.use('/api', rateLimiter);
+    app.use(options.mcpEndpointPath ?? '/mcp', rateLimiter);
+  }
 
   // Compose the real authentication provider (if supplied). The web session
   // resolver is memoized on the options object so every resolveRequestIdentity
@@ -1584,6 +1656,7 @@ export function createPipelineApi(options: PipelineApiOptions = {}): PipelineApi
         mcpAuthOptions === undefined
           ? (request) => resolveRequestIdentity(request, options)
           : bearerIdentityResolver(),
+      onToolCall: (tool, outcome) => metrics.recordMcpToolCall(tool, outcome),
       ...(options.environment === undefined ? {} : { environment: options.environment })
     });
     const mcpMiddleware =

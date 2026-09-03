@@ -180,6 +180,14 @@ export interface OperationServiceOptions {
   environment?: AuthorizationEnvironment;
   idempotencyTtlMs?: number;
   approvalTtlMs?: number;
+  /**
+   * Wall-clock timeout (ms) for a single operation execution. Because
+   * invocations are serialized, a hung handler (for example a stalled upstream
+   * network call driven by an autonomous agent) would otherwise block every
+   * subsequent operation. On timeout the invocation rejects with a structured
+   * error and the queue proceeds. Default 20000ms; set to 0 to disable.
+   */
+  operationTimeoutMs?: number;
   /** Optional deterministic trace IDs; default IDs are server-private UUIDs. */
   traceIdentifiers?: TraceIdentifierFactory;
 }
@@ -741,6 +749,7 @@ export class OperationService {
   private readonly environment?: AuthorizationEnvironment;
   private readonly idempotencyTtlMs: number;
   private readonly approvalTtlMs: number;
+  private readonly operationTimeoutMs: number;
   private readonly traceIdentifiers?: TraceIdentifierFactory;
   /** Serializes ledger lookup, handler execution, and repository commit. */
   private executionTail: Promise<void> = Promise.resolve();
@@ -765,6 +774,16 @@ export class OperationService {
       Number.isFinite(options.approvalTtlMs) && options.approvalTtlMs! > 0
         ? options.approvalTtlMs!
         : 15 * 60 * 1000;
+    // 0 (or an explicit non-positive value) disables the timeout; undefined
+    // falls back to the 20s default. A negative/NaN value is treated as the
+    // default rather than accidentally disabling protection.
+    this.operationTimeoutMs =
+      options.operationTimeoutMs === 0
+        ? 0
+        : Number.isFinite(options.operationTimeoutMs) &&
+            options.operationTimeoutMs! > 0
+          ? options.operationTimeoutMs!
+          : 20_000;
     this.traceIdentifiers = options.traceIdentifiers;
     this.registerHandlers({ ...(options.handlers ?? {}), ...initialHandlers });
     this.registerOrchestrationAdapters(
@@ -856,8 +875,42 @@ export class OperationService {
       ? (second as OperationInvocationContext | undefined)
       : undefined;
     return this.enqueue(() =>
-      this.executeInvocation<N>(raw, context, !envelope)
+      this.withOperationTimeout(
+        operationNameForActivity(raw.name),
+        this.executeInvocation<N>(raw, context, !envelope)
+      )
     );
+  }
+
+  /**
+   * Race an in-flight execution against the configured wall-clock timeout. On
+   * timeout it rejects with a structured error so the serialized queue and the
+   * caller both proceed instead of blocking behind a stalled handler. The
+   * underlying work may still settle later; because handlers only mutate an
+   * isolated draft that is committed atomically by `transactAsync`, a late
+   * completion cannot corrupt state — at worst it fails the revision check.
+   */
+  private withOperationTimeout<T>(
+    operationName: string,
+    work: Promise<T>
+  ): Promise<T> {
+    if (this.operationTimeoutMs <= 0) return work;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(
+          new InternalError(
+            `Operation ${operationName} exceeded the ${this.operationTimeoutMs}ms execution timeout`,
+            { reason: 'operation_timeout' }
+          )
+        );
+      }, this.operationTimeoutMs);
+      // Do not keep the event loop alive solely for this timer.
+      (timer as { unref?: () => void }).unref?.();
+    });
+    return Promise.race([work, timeout]).finally(() => {
+      if (timer !== undefined) clearTimeout(timer);
+    }) as Promise<T>;
   }
 
   private enqueue<T>(work: () => Promise<T>): Promise<T> {

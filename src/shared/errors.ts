@@ -30,7 +30,8 @@ export const PIPELINE_ERROR_DETAIL_REASONS = [
   'input_invalid',
   'approval_not_found',
   'record_not_found',
-  'trace_not_found'
+  'trace_not_found',
+  'operation_timeout'
 ] as const;
 export type PipelineErrorDetailReason =
   (typeof PIPELINE_ERROR_DETAIL_REASONS)[number];

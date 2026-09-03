@@ -1,3 +1,7 @@
+// Load environment variables from a local .env file before anything reads
+// process.env (Firestore credentials, PERSISTENCE_BACKEND, auth config, etc.).
+// This is a no-op when no .env file is present.
+import 'dotenv/config';
 import path from 'node:path';
 import { createServer as createViteServer } from 'vite';
 import type { Express } from 'express';
@@ -24,6 +28,16 @@ import {
   type TrustedActorResolver
 } from './src/server/authorization';
 import type { AuthProvider } from './src/server/auth';
+import {
+  createDurablePersistence,
+  durablePersistenceAvailable,
+  type DurablePersistence
+} from './src/server/persistence';
+import { getLogger } from './src/server/observability/logger';
+import {
+  startMaintenanceScheduler,
+  type MaintenanceHandle
+} from './src/server/maintenance';
 
 export interface ServerOptions extends PipelineApiOptions {
   port?: number;
@@ -46,6 +60,8 @@ export interface ServerComposition {
   environment: AuthorizationEnvironment;
   trustedActorResolver: TrustedActorResolver;
   authorizationPolicy: AuthorizationPolicy;
+  /** Present only when durable Firestore persistence is active. */
+  durablePersistence?: DurablePersistence;
 }
 
 /**
@@ -70,12 +86,41 @@ export async function createServerApp(
   const authorizationPolicy =
     options.authorizationPolicy ?? createAuthorizationPolicy({ environment });
 
+  // Durable persistence: when Firestore is configured (credentials present and
+  // not explicitly disabled), replace the in-memory repository, idempotency
+  // ledger, and web session store with Firestore-backed equivalents so state
+  // survives restarts and is shared across instances. When it is unavailable,
+  // the deterministic in-memory demo stores are used exactly as before.
+  let durablePersistence: DurablePersistence | undefined;
+  if (
+    options.repository === undefined &&
+    options.operationService === undefined &&
+    durablePersistenceAvailable()
+  ) {
+    try {
+      durablePersistence = await createDurablePersistence({
+        onError: (error, context) =>
+          getLogger().error(
+            { err: error, store: context.store, operation: context.operation },
+            'persistence write failed'
+          )
+      });
+      getLogger().info('durable persistence enabled (Firestore)');
+    } catch (error) {
+      getLogger().warn(
+        { err: error },
+        'Firestore persistence unavailable; falling back to in-memory state'
+      );
+    }
+  }
+
   // Keep every mutable dependency in this composition root. The API factory
   // remains injectable for tests, but the running server explicitly owns the
   // deterministic seed, complete operation registry, service, and publisher.
   const repository =
     options.operationService?.repository ??
     options.repository ??
+    durablePersistence?.repository ??
     new SharedStateRepository(createSeed());
   const operationService =
     options.operationService ??
@@ -96,6 +141,21 @@ export async function createServerApp(
       approvalTtlMs: options.approvalTtlMs,
       traceIdentifiers: options.traceIdentifiers
     });
+  // When durable persistence is active and a web OIDC provider is configured,
+  // back its session store with Firestore (unless the caller already supplied
+  // one) so browser sessions survive restarts and work across instances.
+  let authProvider = options.authProvider;
+  if (
+    durablePersistence !== undefined &&
+    authProvider?.web !== undefined &&
+    authProvider.web.store === undefined
+  ) {
+    authProvider = {
+      ...authProvider,
+      web: { ...authProvider.web, store: durablePersistence.sessionStore }
+    };
+  }
+
   const eventPublisher =
     options.eventPublisher ?? new StateEventPublisher(operationService.repository);
   const publicJobs =
@@ -113,7 +173,7 @@ export async function createServerApp(
     githubProspectsOptions: options.githubProspectsOptions,
     stateProjectionHooks: options.stateProjectionHooks,
     stateProjection: options.stateProjection,
-    ...(options.authProvider === undefined ? {} : { authProvider: options.authProvider })
+    ...(authProvider === undefined ? {} : { authProvider })
   };
 
   // An injected service may still receive test/extension handlers, while the
@@ -145,7 +205,8 @@ export async function createServerApp(
     api,
     environment,
     trustedActorResolver,
-    authorizationPolicy
+    authorizationPolicy,
+    durablePersistence
   };
 }
 
@@ -155,20 +216,46 @@ export async function startServer(options: ServerOptions = {}) {
     api,
     environment,
     trustedActorResolver,
-    authorizationPolicy
+    authorizationPolicy,
+    durablePersistence
   } = await createServerApp(options);
-  const port = options.port ?? 3000;
-  const host = options.host ?? 'localhost';
-  const server = app.listen(port, host, () => {
-    console.log(`Server running on http://${host}:${port}`);
+  // Cloud Run (and most container platforms) inject the listen port via PORT
+  // and require binding all interfaces. Explicit options still win for tests.
+  const envPort = Number(process.env.PORT);
+  const port =
+    options.port ?? (Number.isInteger(envPort) && envPort > 0 ? envPort : 3000);
+  const host =
+    options.host ?? (process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost');
+  const logger = getLogger();
+
+  // Scheduled cleanup for approval-card and ledger TTLs (and public-prospect
+  // retention). Without this, expired records only transition lazily on access
+  // and would accumulate in a long-running durable store.
+  const maintenance: MaintenanceHandle = startMaintenanceScheduler({
+    repository: api.repository
   });
+
+  const server = app.listen(port, host, () => {
+    logger.info({ host, port, environment }, 'server started');
+  });
+
+  const close = async (): Promise<void> => {
+    maintenance.stop();
+    api.events.close();
+    durablePersistence?.repository.stopRemoteSync();
+    await durablePersistence?.repository.flush().catch(() => undefined);
+    await durablePersistence?.ledger.flush().catch(() => undefined);
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  };
 
   return {
     server,
     api,
     environment,
     trustedActorResolver,
-    authorizationPolicy
+    authorizationPolicy,
+    maintenance,
+    close
   };
 }
 
@@ -178,8 +265,23 @@ function isEntrypoint(): boolean {
 }
 
 if (isEntrypoint()) {
-  void startServer().catch((error) => {
-    console.error(error);
-    process.exitCode = 1;
-  });
+  void startServer()
+    .then(({ close }) => {
+      const logger = getLogger();
+      const shutdown = (signal: string) => {
+        logger.info({ signal }, 'shutting down gracefully');
+        void close()
+          .then(() => process.exit(0))
+          .catch((error) => {
+            logger.error({ err: error }, 'error during shutdown');
+            process.exit(1);
+          });
+      };
+      process.once('SIGTERM', () => shutdown('SIGTERM'));
+      process.once('SIGINT', () => shutdown('SIGINT'));
+    })
+    .catch((error) => {
+      getLogger().error({ err: error }, 'failed to start server');
+      process.exitCode = 1;
+    });
 }

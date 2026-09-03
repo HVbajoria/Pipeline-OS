@@ -562,6 +562,59 @@ The provided `.env.example` documents `GEMINI_API_KEY` and `APP_URL` values used
 
 `server.ts` exports `createServerApp(options)` and `startServer(options)`. The default port is `3000` and the default host is `localhost`; callers embedding the composition root can provide `port`, `host`, repository, operation service, handlers, or event publisher. The demo does not read a `PORT` environment variable automatically.
 
+### Durable persistence (Cloud Firestore)
+
+By default the server keeps `Shared_State`, the idempotency ledger, and web sessions in memory, so they reset on restart and are not shared across instances. For production these three seams can be backed by Cloud Firestore through the Firebase Admin SDK (a service account), which makes state durable across restarts and consistent across horizontally scaled instances. The browser/web Firebase config is deliberately **not** used for server persistence; the server writes authoritative state and must use Admin credentials.
+
+The composition root swaps in the durable stores automatically when Firestore is configured, and otherwise keeps the in-memory demo behavior. Selection is controlled by `PERSISTENCE_BACKEND`:
+
+| `PERSISTENCE_BACKEND` | Behavior |
+| --- | --- |
+| `firestore` | Force durable Firestore persistence. |
+| `memory` | Force the in-memory demo stores, ignoring any credentials. |
+| unset | Auto: use Firestore when credentials are available, otherwise in-memory. |
+
+Credentials resolve in order: inline/file `FIREBASE_SERVICE_ACCOUNT`, then `GOOGLE_APPLICATION_CREDENTIALS` (a key file path), then Application Default Credentials (for example the Cloud Run / GCE metadata server, the recommended production path with no key files). The project id defaults to `pipelineos-d8a4e` and can be overridden with `FIREBASE_PROJECT_ID`. See `.env.example` for every variable.
+
+Design (in `src/server/persistence/`):
+
+- **State repository (`FirestoreStateRepository`).** Operation handlers still mutate state synchronously through the same `transact`/`commit` path, preserving the single operation boundary. The subclass hydrates from the last persisted snapshot at startup (`FirestoreStateRepository.create()`), mirrors every committed revision to a single Firestore document as a write-through (Maps are serialized to `[key, value]` entries), and adopts revisions written by other instances via a Firestore `onSnapshot` listener so SSE fan-out works across a multi-instance deployment. An instance ignores the echo of its own writes by tracking the last revision it persisted.
+- **Idempotency ledger (`FirestoreInvocationLedger`).** The `InvocationLedger` interface is synchronous, so this is a write-through cache: an in-memory `Map` serves the synchronous hot path the `OperationService` reads inline, while every mutation mirrors to Firestore in the background and `load()` rehydrates the cache at startup (dropping expired entries). Idempotency keys and their recorded responses therefore survive a restart, so retries are not double-applied.
+- **Web session store (`FirestoreWebSessionStore`).** The `WebSessionStore` interface already permits async, so signed-in browser sessions live in Firestore natively, survive restarts, and work behind a load balancer. It is injected into `authProvider.web.store` automatically when durable persistence and a web OIDC provider are both configured. Expiry is enforced on read.
+
+Firestore collections used: `pipeline_state` (single `shared_state` snapshot document), `invocation_ledger`, and `web_sessions`. All are configurable through `createDurablePersistence({ collections })`.
+
+### Abuse protection and transport safety
+
+Exposing `/api/*` and `/mcp` to the public internet — and to an LLM host such as a ChatGPT connector that autonomously chooses and calls tools — means the transport must defend itself before a request reaches the operation boundary. The API factory installs the following (all configurable via the `security` option on `createPipelineApi`/`startServer`, or environment variables with safe defaults):
+
+- **Security headers** via helmet (`X-Content-Type-Options`, `X-DNS-Prefetch-Control`, removal of `X-Powered-By`, etc.), tuned so they do not break the SPA or the existing WebMCP eligibility headers (`Origin-Agent-Cluster`, `Permissions-Policy: tools=(self)`).
+- **CORS allowlist** (`CORS_ALLOWED_ORIGINS`) — same-origin by default; server-to-server calls with no `Origin` header are allowed.
+- **Request body cap** (`REQUEST_BODY_LIMIT`, default `256kb`) so a runaway client cannot exhaust memory.
+- **Rate limiting** on `/api` and `/mcp`, keyed by the resolved principal (tenant + subject from the verified bearer claims) and falling back to client IP, returning a structured `RATE_LIMITED_ERROR` (HTTP 429). Tune with `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX`; disable in tests with `RATE_LIMIT_DISABLED=true`.
+- **Operation execution timeout** (`operationTimeoutMs`, default 20s) in `OperationService`. Because invocations are serialized, a hung handler (for example a stalled upstream call driven by an agent) would otherwise block every subsequent operation; on timeout the invocation rejects with a structured error and the queue proceeds. Handlers only mutate an isolated draft committed atomically, so a late completion cannot corrupt state.
+
+### Agent (LLM) safety: irreversible mutations require a human
+
+The plan → approve → commit lifecycle is the human-in-the-loop safety pattern, and two additional invariants protect against an autonomous agent (for example a ChatGPT connector) taking irreversible action on its own:
+
+- **No agent self-approval.** `approve_operation_plan` and `reject_operation_plan` require a trusted human principal with the approval capability; an `agent` principal is always denied (`approvalPrincipal.qualified === false`). This is guarded by `test/agent-safety.test.ts`.
+- **No direct agent execution of irreversible mutations.** `send_offer`, `respond_to_offer`, and `import_public_prospect` are marked `agentDirectExecution: 'forbidden'` in the operation registry. When an `agent` principal attempts to execute one directly (commit mode without a human-approved plan), the authorization policy denies it with `denialReason: 'agent_execution_forbidden'` and a message directing it to `plan_operation`. Human principals (recruiter for `send_offer`, candidate for `respond_to_offer`) are unaffected, and the agent can still reach these operations through the approved plan/commit path. These invariants are covered by `test/agent-safety.test.ts` and the transport hardening by `test/transport-security.integration.test.ts`.
+
+### Observability and operations
+
+The system already produces one activity entry per invocation (operation, actor, phase, correlation/trace ids, structured error on failure, and a root trace span with a duration). The observability layer surfaces that operationally without changing the operation path:
+
+- **Structured logging** (`src/server/observability/logger.ts`, pino). One JSON line per event in production (the shape Cloud Run / Cloud Logging ingest directly), pretty-printed in development, silent in tests. Level via `LOG_LEVEL`. `console.log`/`console.error` in `server.ts` are replaced with the logger, and known secret fields are redacted. Correlation and trace ids (already flowing as `X-Correlation-Id` and activity `traceId`) can be bound to a child logger.
+- **Metrics** (`src/server/observability/metrics.ts`) exposed at `GET /metrics` in Prometheus text exposition format — Prometheus/OpenMetrics-compatible, so any scraper or an OpenTelemetry collector's Prometheus receiver can consume it (no heavy SDK bundled). A repository subscription feeds the registry from the activity log:
+  - `pipelineos_operations_total{operation,phase,actor_type,outcome}`
+  - `pipelineos_operation_errors_total{operation,code}` (error rate by structured code)
+  - `pipelineos_operation_duration_seconds` (histogram, from the root trace span)
+  - `pipelineos_mcp_tool_calls_total{tool,outcome}` (MCP tool-call volume, recorded at the `/mcp` transport)
+  - process gauges (uptime, RSS, heap). Disable the endpoint with `METRICS_ENABLED=false`.
+- **Health and readiness** for container orchestration: `GET /health` (liveness, always 200 while the process is up) and `GET /ready` (readiness — returns 503 if the authoritative store cannot be read; for the durable Firestore repository this exercises the hydrated snapshot). Both are unauthenticated and excluded from rate limiting so probes and scrapers are never throttled.
+- **Scheduled maintenance** (`src/server/maintenance.ts`). A periodic sweep (`MAINTENANCE_INTERVAL_MS`, default 5 min) expires overdue approval cards, prunes expired idempotency-ledger entries, and applies public-prospect retention. Previously these only transitioned lazily when an operation happened to touch them, which leaks stale records in a long-running durable store. The scheduler is `unref`'d and stopped on graceful `SIGTERM`/`SIGINT` shutdown, which also flushes pending Firestore writes. Covered by `test/observability-metrics.test.ts`, `test/observability-endpoints.integration.test.ts`, and `test/maintenance-sweep.test.ts`.
+
 ### Non-watch validation
 
 These are the repository's single-run validation commands:
@@ -587,7 +640,11 @@ npm run build
 NODE_ENV=production npm start
 ```
 
-`npm start` runs `node dist/server.cjs`. Setting `NODE_ENV=production` makes the composition root serve the static `dist` SPA from Express instead of attempting Vite middleware. On PowerShell, use `$env:NODE_ENV = "production"; npm start`.
+`npm start` runs `node dist/server.cjs`. Setting `NODE_ENV=production` makes the composition root serve the static `dist` SPA from Express instead of attempting Vite middleware, honors the `PORT` env var, and binds `0.0.0.0`. On PowerShell, use `$env:NODE_ENV = "production"; npm start`.
+
+### Container image and deployment
+
+This project standardizes on **npm** with a committed, fully pinned `package-lock.json` (no `^`/`~` ranges), so use `npm ci` for reproducible installs. A multi-stage `Dockerfile` and `.dockerignore` build the `node:20-slim` production image (non-root, `HEALTHCHECK` on `/health`). The application version is sourced once from `package.json` (`src/server/version.ts`) and is what `MCP_SERVER_INFO` advertises to MCP clients, so the two never drift. See **[DEPLOY.md](./DEPLOY.md)** for building the image and deploying to Cloud Run, including using a runtime service account for Firestore ADC (no key files) and Secret Manager for secrets instead of `.env`.
 
 ## Testing and property-test conventions
 
@@ -598,6 +655,7 @@ NODE_ENV=production npm start
 - Cross-interface tests invoke the real `OperationClient` and WebMCP adapter against an in-memory service, hydrate the real Zustand store, render the actual role shell to static markup, and check shared projections. They do not mock the operation implementation or use an external API.
 - The tour's browser-independent configuration is covered by `test/app-tour.test.ts`; the existing SSR shell tests cover role/documentation rendering and the shared activity feed.
 - Keep test inputs JSON-safe and use seeded repositories, fixed clocks, and deterministic ID generators when a test needs stable output.
+- Production-path seams have real (non-stub) coverage: `test/oidc-verification.test.ts` performs a genuine RS256 sign/verify round-trip through `OidcTokenVerifier` (Node `crypto`, no `jose`); `test/repository-conformance.test.ts` runs one shared behavior suite against both the in-memory `SharedStateRepository` and the `FirestoreStateRepository` (backed by an in-memory Firestore fake in `test/helpers/`), and asserts durable hydrate-on-restart and cross-instance `onSnapshot` adoption; `test/tenant-isolation.test.ts` proves a principal in one tenant cannot read or write another tenant's resources; and `test/mcp-e2e.integration.test.ts` drives a real HTTP `tools/list` + `tools/call` against `/mcp` with a bearer token and asserts the audit entry matches the one a UI-click (`POST /api/operations` under a web session) produces.
 
 ## Troubleshooting and demo guidance
 

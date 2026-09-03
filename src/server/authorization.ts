@@ -122,7 +122,8 @@ export type AuthorizationDenialReason =
   | 'resource_scope'
   | 'approval_principal_required'
   | 'consent_required'
-  | 'approval_only';
+  | 'approval_only'
+  | 'agent_execution_forbidden';
 
 /**
  * Internal scope carried by a trusted principal.  IDs and tenant values never
@@ -1539,12 +1540,26 @@ function createDecision(
     requiresPlan
   };
 
+  // An autonomous agent principal may never DIRECTLY execute an operation
+  // flagged agentDirectExecution:'forbidden' (irreversible mutations such as
+  // sending or responding to an offer). It must instead route through the
+  // human-in-the-loop plan/approve/commit lifecycle, so we only forbid the
+  // direct commit path, not the plan/approval phases. Human principals and
+  // service/system principals are unaffected.
+  const agentDirectExecutionForbidden =
+    principal.actor.actorType === 'agent' &&
+    descriptor?.agentDirectExecution === 'forbidden' &&
+    (mode === 'commit' || mode === 'direct') &&
+    request.approval?.status !== 'approved';
+
   let denialReason: AuthorizationDenialReason | undefined;
   if (!authenticated) denialReason = 'not_authenticated';
   else if (!operationAllowed) denialReason = 'capability_denied';
   else if (!resourceScope.allowed) denialReason = 'resource_scope';
   else if (!modeAllowed) denialReason = 'capability_denied';
-  else if (!consentIsSatisfied) denialReason = 'consent_required';
+  else if (agentDirectExecutionForbidden) {
+    denialReason = 'agent_execution_forbidden';
+  } else if (!consentIsSatisfied) denialReason = 'consent_required';
   else if (approvalRequired && !qualifiedApprovalPrincipal) {
     denialReason = 'approval_principal_required';
   } else if (requiresPlan || (approvalRequired && !approvalStatusSatisfied)) {
@@ -1691,6 +1706,16 @@ export function authorizationDecisionError(
       ? {}
       : { resourceScope: decision.resourceScope.summary })
   };
+
+  if (decision.denialReason === 'agent_execution_forbidden') {
+    return new ForbiddenError(
+      'An autonomous agent cannot execute this operation directly; it must be proposed through plan_operation and approved by a human.',
+      {
+        ...details,
+        reason: 'approval_principal_required'
+      }
+    );
+  }
 
   if (
     decision.denialReason === 'approval_only' ||
