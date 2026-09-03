@@ -69,14 +69,22 @@ export function resolveBodyLimit(options: SecurityOptions = {}): string {
 }
 
 /**
- * Build the helmet middleware. `contentSecurityPolicy` is disabled by default
- * because the SPA and Vite dev server inline scripts/styles; a deployment that
- * wants a strict CSP can layer its own. Cross-origin resource policy is relaxed
- * to same-site so static assets and the API can be served from one origin.
+ * Build the helmet middleware. CSP is enabled with directives that preserve
+ * because the SPA and Vite dev server inline scripts/styles; a deployment that	 * SPA/Vite compatibility (including inline script/style usage during dev).
+ * wants a strict CSP can layer its own. Cross-origin resource policy is relaxed	 * Cross-origin resource policy is relaxed to same-site so static assets and
+ * to same-site so static assets and the API can be served from one origin.	 * the API can be served from one origin.
  */
 export function createSecurityHeaders(): RequestHandler {
   return helmet({
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: {
+      directives: {
+        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+        "script-src": ["'self'", "'unsafe-inline'"],
+        "style-src": ["'self'", "'unsafe-inline'"],
+        "connect-src": ["'self'", "ws:", "wss:", "http:", "https:"],
+        "upgrade-insecure-requests": null
+      }
+    },
     crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: { policy: 'same-site' }
   });
