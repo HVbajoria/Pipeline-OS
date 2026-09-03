@@ -85,6 +85,17 @@ import {
   type GitHubProspectServiceApi,
   type GitHubProspectServiceOptions
 } from './prospects';
+import { createMcpRequestHandler } from './mcp';
+import {
+  type AuthProvider,
+  mcpAuthOptionsFromProvider,
+  createProtectedResourceMetadataHandler,
+  createMcpBearerMiddleware,
+  bearerIdentityResolver,
+  PROTECTED_RESOURCE_METADATA_PATH,
+  createWebSessionResolver,
+  installWebAuthRoutes
+} from './auth';
 
 export type StateProjectionFilter<T> = (
   record: T,
@@ -153,6 +164,22 @@ export interface PipelineApiOptions extends OperationServiceOptions {
   stateProjectionHooks?: Omit<StateProjectionHooks, 'actor'>;
   /** Compatibility spelling for hosts that call these projection options. */
   stateProjection?: Omit<StateProjectionHooks, 'actor'>;
+  /**
+   * Mount the remote MCP endpoint at `/mcp` (default true). This exposes the
+   * same 32 canonical operations to MCP clients such as ChatGPT connectors,
+   * routed through the shared `OperationService` and the same trusted-identity
+   * boundary used by the HTTP API.
+   */
+  enableMcpEndpoint?: boolean;
+  /** Path for the remote MCP endpoint. Defaults to `/mcp`. */
+  mcpEndpointPath?: string;
+  /**
+   * Real authentication provider. When supplied it maps authenticated users
+   * (web OIDC session and/or MCP OAuth bearer) to a `TrustedPrincipal`. When
+   * omitted, identity resolution keeps its existing behavior (demo resolver in
+   * non-production, fail-closed in production).
+   */
+  authProvider?: AuthProvider;
 }
 
 export interface PipelineApi {
@@ -163,6 +190,16 @@ export interface PipelineApi {
   publicJobs: PublicJobsService;
   githubProspects: GitHubProspectServiceApi;
 }
+
+/**
+ * Internal, non-public options fields memoized inside createPipelineApi. Kept
+ * off PipelineApiOptions so callers do not construct them directly.
+ */
+type PipelineApiInternalOptions = PipelineApiOptions & {
+  _webSessionResolver?: (
+    request: Request
+  ) => Promise<TrustedPrincipal | undefined>;
+};
 
 function mapValues<T>(collection: Map<string, T>): T[] {
   return [...collection.values()].map((value) => deepClone(value));
@@ -1026,7 +1063,7 @@ function legacyOfferDecision(value: unknown): unknown {
   return value;
 }
 
-type RequestIdentity = {
+export type RequestIdentity = {
   actor: ActorContext;
   principal?: TrustedPrincipal;
 };
@@ -1056,10 +1093,20 @@ function trustedActorHeaders(request: Request, environment?: AuthorizationEnviro
   return headers;
 }
 
-async function resolveRequestIdentity(
+export async function resolveRequestIdentity(
   request: Request,
   options: PipelineApiOptions
 ): Promise<RequestIdentity> {
+  // A configured web OIDC session takes precedence: a signed-in browser user
+  // is a trusted principal regardless of the demo/trusted resolver below.
+  const webResolver = (options as PipelineApiInternalOptions)._webSessionResolver;
+  if (webResolver !== undefined) {
+    const principal = await webResolver(request);
+    if (principal !== undefined) {
+      return { actor: principal.actor, principal };
+    }
+  }
+
   if (options.trustedActorResolver !== undefined) {
     const principal = await resolveTrustedActorContext(
       request,
@@ -1482,6 +1529,28 @@ export function createPipelineApi(options: PipelineApiOptions = {}): PipelineApi
 
   app.use(express.json());
 
+  // Compose the real authentication provider (if supplied). The web session
+  // resolver is memoized on the options object so every resolveRequestIdentity
+  // call shares one session store; MCP bearer config guards /mcp below.
+  const authProvider = options.authProvider;
+  if (authProvider?.web !== undefined) {
+    const store = installWebAuthRoutes(app, authProvider.web);
+    (options as PipelineApiInternalOptions)._webSessionResolver =
+      createWebSessionResolver({ ...authProvider.web, store });
+  }
+  const mcpAuthOptions =
+    authProvider === undefined ? undefined : mcpAuthOptionsFromProvider(authProvider);
+  if (mcpAuthOptions !== undefined) {
+    // RFC 9728 discovery document so an MCP client (ChatGPT connector) can
+    // find the authorization server before calling /mcp. The SDK metadata
+    // handler is a nested router matching its mount root, so it is mounted with
+    // app.use rather than app.get.
+    app.use(
+      PROTECTED_RESOURCE_METADATA_PATH,
+      createProtectedResourceMetadataHandler(mcpAuthOptions)
+    );
+  }
+
   const canonicalRoute = async (
     request: Request,
     response: Response,
@@ -1499,6 +1568,44 @@ export function createPipelineApi(options: PipelineApiOptions = {}): PipelineApi
   };
 
   app.post('/api/operations/:operationName', canonicalRoute);
+
+  // Remote MCP endpoint. It maps the canonical operation registry to MCP
+  // tools and dispatches tools/call through the same OperationService and
+  // trusted-identity boundary used by the HTTP routes above, so an MCP client
+  // (for example a ChatGPT connector) reaches identical state and audit paths.
+  if (options.enableMcpEndpoint !== false) {
+    const mcpPath = options.mcpEndpointPath ?? '/mcp';
+    // When MCP OAuth is configured, a bearer token is required and its verified
+    // claims become the principal. Otherwise identity falls back to the shared
+    // resolveRequestIdentity path (web session, demo resolver, or fail-closed).
+    const mcpHandler = createMcpRequestHandler({
+      dispatcher: operationService,
+      resolveIdentity:
+        mcpAuthOptions === undefined
+          ? (request) => resolveRequestIdentity(request, options)
+          : bearerIdentityResolver(),
+      ...(options.environment === undefined ? {} : { environment: options.environment })
+    });
+    const mcpMiddleware =
+      mcpAuthOptions === undefined
+        ? [mcpHandler]
+        : [
+            createMcpBearerMiddleware(
+              mcpAuthOptions,
+              new URL(
+                PROTECTED_RESOURCE_METADATA_PATH,
+                mcpAuthOptions.resourceUrl
+              ).toString()
+            ),
+            mcpHandler
+          ];
+    // Streamable HTTP uses POST for JSON-RPC. GET/DELETE are answered by the
+    // transport (SSE stream / session teardown), which returns 405 in the
+    // stateless configuration; the handler owns those responses.
+    app.post(mcpPath, ...mcpMiddleware);
+    app.get(mcpPath, ...mcpMiddleware);
+    app.delete(mcpPath, ...mcpMiddleware);
+  }
 
   app.get('/api/public-jobs', async (request, response, next) => {
     try {

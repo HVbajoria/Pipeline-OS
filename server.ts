@@ -23,6 +23,7 @@ import {
   type ProductionTrustedPrincipalResolver,
   type TrustedActorResolver
 } from './src/server/authorization';
+import type { AuthProvider } from './src/server/auth';
 
 export interface ServerOptions extends PipelineApiOptions {
   port?: number;
@@ -35,6 +36,8 @@ export interface ServerOptions extends PipelineApiOptions {
   authorizationPolicy?: AuthorizationPolicy;
   /** Production host callback; arbitrary actor headers are never used here. */
   resolveTrustedPrincipal?: ProductionTrustedPrincipalResolver;
+  /** Real auth provider (web OIDC session and/or MCP OAuth bearer). */
+  authProvider?: AuthProvider;
 }
 
 export interface ServerComposition {
@@ -109,7 +112,8 @@ export async function createServerApp(
     githubProspectAuthorization: options.githubProspectAuthorization,
     githubProspectsOptions: options.githubProspectsOptions,
     stateProjectionHooks: options.stateProjectionHooks,
-    stateProjection: options.stateProjection
+    stateProjection: options.stateProjection,
+    ...(options.authProvider === undefined ? {} : { authProvider: options.authProvider })
   };
 
   // An injected service may still receive test/extension handlers, while the

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Activity, Book, Briefcase, CheckCircle, FileText, HelpCircle, Menu, User, Users, X } from 'lucide-react';
 import ActivityTracePanel from './components/ActivityTracePanel';
 import { AppTour } from './components/AppTour';
@@ -38,6 +38,93 @@ function useOperationError(): [string | null, (error: unknown) => void] {
   const [message, setMessage] = useState<string | null>(null);
   return [message, (error) => setMessage(errorMessage(error))];
 }
+
+interface WorkspacePageConfig {
+  id: string;
+  label: string;
+  description: string;
+}
+
+interface WorkspacePageNavProps {
+  pages: readonly WorkspacePageConfig[];
+  activePage: string;
+  onChange: (page: string) => void;
+}
+
+function WorkspacePageNav({ pages, activePage, onChange }: WorkspacePageNavProps) {
+  return (
+    <nav aria-label="Workspace sections" data-workspace-nav className="workspace-page-nav">
+      <div className="workspace-page-nav__label">Workspace</div>
+      <div className="workspace-page-nav__items">
+        {pages.map((page) => {
+          const selected = page.id === activePage;
+          return (
+            <button
+              key={page.id}
+              type="button"
+              data-workspace-page-link={page.id}
+              aria-current={selected ? 'page' : undefined}
+              aria-controls={`workspace-page-${page.id}`}
+              onClick={() => onChange(page.id)}
+              className={`workspace-page-nav__item${selected ? ' is-active' : ''}`}
+            >
+              <span className="workspace-page-nav__item-label">{page.label}</span>
+              <span className="workspace-page-nav__item-description">{page.description}</span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+function WorkspacePage({
+  id,
+  label,
+  activePage,
+  children
+}: {
+  id: string;
+  label: string;
+  activePage: string;
+  children: ReactNode;
+}) {
+  return (
+    <section
+      id={`workspace-page-${id}`}
+      data-workspace-page={id}
+      aria-label={label}
+      hidden={activePage !== id}
+      className="workspace-page"
+    >
+      {children}
+    </section>
+  );
+}
+
+const RECRUITER_PAGES: readonly WorkspacePageConfig[] = [
+  { id: 'overview', label: 'Overview', description: 'What needs attention now' },
+  { id: 'pipeline', label: 'Pipeline', description: 'Review and move candidates' },
+  { id: 'requisitions', label: 'Requisitions', description: 'Roles and talent sources' },
+  { id: 'candidate-flow', label: 'Candidate flow', description: 'Detailed application stages' }
+];
+
+const CANDIDATE_PAGES: readonly WorkspacePageConfig[] = [
+  { id: 'overview', label: 'Overview', description: 'Your next step' },
+  { id: 'applications', label: 'Applications', description: 'Applications and interviews' },
+  { id: 'offers', label: 'Offers & onboarding', description: 'Decisions and preparation' },
+  { id: 'roles', label: 'Explore roles', description: 'Open jobs and questions' }
+];
+
+const HIRING_MANAGER_PAGES: readonly WorkspacePageConfig[] = [
+  { id: 'overview', label: 'Overview', description: 'Workflow and comparison' },
+  { id: 'interviews', label: 'Interview feedback', description: 'Prepare and submit scorecards' }
+];
+
+const DOCUMENTATION_PAGES: readonly WorkspacePageConfig[] = [
+  { id: 'catalog', label: 'Operation catalog', description: 'Browse the registered tools' },
+  { id: 'guide', label: 'How it works', description: 'Understand execution and safety' }
+];
 
 const MAX_VISIBLE_ACTIVITY_ENTRIES = 100;
 
@@ -198,6 +285,7 @@ const DocumentationView = () => {
   const descriptors = OPERATION_NAMES.map((name) => OPERATION_REGISTRY[name]);
   const [manifest, setManifest] = useState<DiscoverCapabilitiesOutput | null>(null);
   const [manifestError, setManifestError] = useState<string | null>(null);
+  const [activePage, setActivePage] = useState('catalog');
   const recruiterActor = actorContextForRole('recruiter');
 
   useEffect(() => {
@@ -235,15 +323,21 @@ const DocumentationView = () => {
           </p>
         )}
         {manifestError && <p data-capability-manifest-error className="mt-2 text-xs text-amber-700">Capability manifest unavailable: {manifestError}</p>}
-      <div data-tour="documentation-registry" className="space-y-6">
+      <WorkspacePageNav pages={DOCUMENTATION_PAGES} activePage={activePage} onChange={setActivePage} />
+      <WorkspacePage id="catalog" label="Operation catalog" activePage={activePage}>
+        <div data-tour="documentation-registry" className="space-y-6">
         {descriptors.map((tool) => {
           const capability = manifest?.capabilities.find((entry) => entry.name === tool.name);
           return (
             <article key={tool.name} className="panel panel--padded">
-              <div className="flex items-center justify-between gap-3 mb-2">
-                <h2 className="text-lg font-bold text-gray-900 font-mono text-blue-600">{tool.name}</h2>
-                <span className="text-xs rounded-full px-2 py-1 bg-slate-100 text-slate-600">{tool.readOnly ? 'read-only' : 'mutation'}</span>
-              </div>
+              <details className="documentation-entry">
+                <summary>
+                  <div className="flex items-center justify-between gap-3">
+                    <h2 className="text-lg font-bold text-gray-900 font-mono text-blue-600">{tool.name}</h2>
+                    <span className="text-xs rounded-full px-2 py-1 bg-slate-100 text-slate-600">{tool.readOnly ? 'read-only' : 'mutation'}</span>
+                  </div>
+                </summary>
+                <div className="documentation-entry__content">
               <p className="text-gray-700 mb-2">{tool.description}</p>
               <p data-operation-capability className="mb-2 text-xs text-gray-500">
                 capability <code>{tool.requiredCapability}</code> · mode <code>{tool.executionClass}</code> · approval <code>{tool.approvalPolicy}</code> · {tool.planable ? 'planable' : 'direct'}
@@ -257,10 +351,25 @@ const DocumentationView = () => {
               <pre className="bg-slate-50 p-4 rounded-lg border border-slate-200 overflow-x-auto text-sm text-slate-800 font-mono whitespace-pre-wrap">
                 {json({ inputSchema: tool.inputSchema, outputSchema: tool.outputSchema, annotations: tool.annotations })}
               </pre>
+                </div>
+              </details>
             </article>
           );
         })}
-      </div>
+        </div>
+      </WorkspacePage>
+      <WorkspacePage id="guide" label="How it works" activePage={activePage}>
+        <div className="workspace-page__intro">
+          <p className="workspace-page__eyebrow">Platform guide</p>
+          <h2 className="workspace-page__title">A shared contract for every interface</h2>
+          <p className="workspace-page__description">PipelineOS uses one operation registry across the UI, HTTP, and WebMCP. The same actor-scoped capability rules, approval boundaries, redaction metadata, and structured errors apply everywhere.</p>
+        </div>
+        <div className="documentation-guide">
+          <article className="documentation-guide__item"><h3>Read before you run</h3><p>Use the catalog to inspect inputs, outputs, annotations, and whether an operation is read-only, direct, or planable.</p></article>
+          <article className="documentation-guide__item"><h3>Plan before you commit</h3><p>Mutations that need review produce a redacted approval card. A trusted human must approve and commit the exact target impact.</p></article>
+          <article className="documentation-guide__item"><h3>Follow the audit trail</h3><p>Activity entries retain the actor, correlation and trace metadata, safe payloads, replay markers, and structured errors.</p></article>
+        </div>
+      </WorkspacePage>
     </div>
   );
 };
@@ -295,6 +404,7 @@ const RecruiterView = () => {
   const [offerAmounts, setOfferAmounts] = useState<Record<string, string>>({});
   const [onboardingStatus, setOnboardingStatus] = useState<Record<string, GetOnboardingStatusOutput>>({});
   const [error, setError] = useOperationError();
+  const [activePage, setActivePage] = useState('overview');
   const actor = actorContextForRole('recruiter');
 
   useEffect(() => {
@@ -411,6 +521,10 @@ const RecruiterView = () => {
   };
 
   const columns = useMemo(() => projectKanban(applications), [applications]);
+  const openJobs = jobs.filter((job) => job.status === 'open').length;
+  const scheduledInterviews = interviews.filter((interview) => interview.status === 'booked').length;
+  const activeOffers = offers.filter((offer) => offer.status === 'sent' || offer.status === 'accepted').length;
+  const onboardingCandidates = applications.filter((application) => application.status === 'onboarding').length;
 
   return (
     <div data-tour="role-view" className="page-shell page-shell--wide">
@@ -426,13 +540,50 @@ const RecruiterView = () => {
         </div>
       </header>
       {error && <div role="alert" className="callout callout--danger mb-5">{error}</div>}
-      <LivePublicJobsPanel />
-      <ApprovalCardsPanel actor={actor} role="recruiter" />
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2 page-section">
-        <WorkflowStatusPanel actor={actor} role="recruiter" />
-        <CandidateComparisonPanel actor={actor} role="recruiter" />
-      </div>
-      <WorkflowCoordinatorPanel actor={actor} role="recruiter" />
+      <WorkspacePageNav pages={RECRUITER_PAGES} activePage={activePage} onChange={setActivePage} />
+      <WorkspacePage id="overview" label="Recruiter overview" activePage={activePage}>
+        <div className="workspace-summary">
+          <div className="workspace-page__intro">
+            <p className="workspace-page__eyebrow">Today at a glance</p>
+            <h2 className="workspace-page__title">Keep the hiring work moving</h2>
+            <p className="workspace-page__description">Start with the area that matches your next decision. Detailed controls live in their own workspace so the dashboard stays calm and scannable.</p>
+          </div>
+          <div className="metric-grid">
+            <div className="metric"><span className="metric__label">Open roles</span><strong className="metric__value">{openJobs}</strong></div>
+            <div className="metric"><span className="metric__label">Applications</span><strong className="metric__value">{applications.length}</strong></div>
+            <div className="metric"><span className="metric__label">Interviews booked</span><strong className="metric__value">{scheduledInterviews}</strong></div>
+            <div className="metric"><span className="metric__label">Offers in motion</span><strong className="metric__value">{activeOffers}</strong></div>
+          </div>
+          <div className="workspace-summary__next">
+            <button type="button" className="workspace-summary__next-item" onClick={() => setActivePage('pipeline')}>
+              <span className="workspace-summary__next-label">Review candidate pipeline</span>
+              <span className="workspace-summary__next-description">Screen, schedule, compare, and take the next action.</span>
+            </button>
+            <button type="button" className="workspace-summary__next-item" onClick={() => setActivePage('requisitions')}>
+              <span className="workspace-summary__next-label">Manage requisitions</span>
+              <span className="workspace-summary__next-description">Create roles, review sources, and inspect open positions.</span>
+            </button>
+            <button type="button" className="workspace-summary__next-item" onClick={() => setActivePage('candidate-flow')}>
+              <span className="workspace-summary__next-label">Open candidate flow</span>
+              <span className="workspace-summary__next-description">See every persisted application stage in one focused view.</span>
+            </button>
+          </div>
+          {onboardingCandidates > 0 && <p className="callout callout--info">{onboardingCandidates} candidate{onboardingCandidates === 1 ? '' : 's'} currently in onboarding. Open Candidate flow to continue background checks, benefits, and checklist work.</p>}
+        </div>
+      </WorkspacePage>
+      <WorkspacePage id="pipeline" label="Recruiter pipeline" activePage={activePage}>
+        <div className="workspace-page__intro">
+          <p className="workspace-page__eyebrow">Decision workspace</p>
+          <h2 className="workspace-page__title">Review and move candidates</h2>
+          <p className="workspace-page__description">Use the canonical workflow status, comparison, approvals, and coordinator controls before changing a candidate’s stage.</p>
+        </div>
+        <ApprovalCardsPanel actor={actor} role="recruiter" />
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+          <WorkflowStatusPanel actor={actor} role="recruiter" />
+          <CandidateComparisonPanel actor={actor} role="recruiter" />
+        </div>
+        <WorkflowCoordinatorPanel actor={actor} role="recruiter" />
+      </WorkspacePage>
 
       {profile && (
         <div role="dialog" aria-modal="true" aria-labelledby="recruiter-profile-title" className="modal-backdrop fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -449,8 +600,15 @@ const RecruiterView = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 page-section">
-        <form onSubmit={handleCreateReq} className="panel panel--padded space-y-4">
+      <WorkspacePage id="requisitions" label="Recruiting requisitions" activePage={activePage}>
+        <div className="workspace-page__intro">
+          <p className="workspace-page__eyebrow">Sourcing workspace</p>
+          <h2 className="workspace-page__title">Roles and talent sources</h2>
+          <p className="workspace-page__description">Keep internal requisitions, approved public listings, and consented prospect sourcing separate and easy to review.</p>
+        </div>
+        <LivePublicJobsPanel />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <form onSubmit={handleCreateReq} className="panel panel--padded space-y-4">
           <h2 className="panel__title">New requisition</h2>
           <input name="title" placeholder="Job title" required className="w-full border rounded p-2 text-sm" />
           <input name="department" placeholder="Department" required className="w-full border rounded p-2 text-sm" />
@@ -465,8 +623,15 @@ const RecruiterView = () => {
         <div className="section-heading"><div><h2 className="section-heading__title">Requisitions</h2><p className="section-heading__description">Internal roles and their current application volume.</p></div></div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{jobs.map((job) => <div key={job.id} className="panel panel--padded"><div className="flex justify-between"><h3 className="font-semibold">{job.title}</h3><span className="text-xs text-green-700">{job.status}</span></div><p className="text-sm text-gray-500">{job.department} · {job.compBand.min.toLocaleString()}–{job.compBand.max.toLocaleString()} {job.compBand.currency}</p><p className="text-sm text-gray-600 mt-2">{applications.filter((application) => application.jobId === job.id).length} applications</p></div>)}</div>
       </section>
+      </WorkspacePage>
 
-      <section className="page-section">
+      <WorkspacePage id="candidate-flow" label="Candidate flow" activePage={activePage}>
+        <div className="workspace-page__intro">
+          <p className="workspace-page__eyebrow">Detailed workflow</p>
+          <h2 className="workspace-page__title">Candidate flow</h2>
+          <p className="workspace-page__description">Use the persisted stage columns to focus on one candidate decision at a time. Application, interview, offer, and onboarding actions stay attached to the record they affect.</p>
+        </div>
+        <section className="page-section">
         <div className="section-heading"><div><h2 className="section-heading__title">Pipeline Kanban</h2><p className="section-heading__description">Columns follow persisted application status.</p></div></div>
         <div className="kanban-grid">
           {columns.map((column) => (
@@ -524,6 +689,7 @@ const RecruiterView = () => {
           ))}
         </div>
       </section>
+      </WorkspacePage>
     </div>
   );
 };
@@ -559,6 +725,7 @@ const CandidateView = () => {
     Record<string, GetOnboardingStatusOutput>
   >({});
   const [error, setError] = useOperationError();
+  const [activePage, setActivePage] = useState('overview');
   const actor = actorContextForRole('candidate');
 
   const run = async (operation: () => Promise<unknown>) => {
@@ -650,6 +817,9 @@ const CandidateView = () => {
       benefitsEnrollments,
       tasks: onboardingTasks
     });
+  const bookedInterviews = interviews.filter((interview) => interview.status === 'booked' && myApplications.some((application) => application.id === interview.applicationId)).length;
+  const pendingOffers = myOffers.filter((offer) => offer.status === 'sent').length;
+  const openRoles = jobs.filter((job) => job.status === 'open').length;
 
   return (
     <div data-tour="role-view" className="page-shell">
@@ -669,6 +839,42 @@ const CandidateView = () => {
           {error}
         </div>
       )}
+      <WorkspacePageNav pages={CANDIDATE_PAGES} activePage={activePage} onChange={setActivePage} />
+      <WorkspacePage id="overview" label="Candidate overview" activePage={activePage}>
+        <div className="workspace-summary">
+          <div className="workspace-page__intro">
+            <p className="workspace-page__eyebrow">Your next step</p>
+            <h2 className="workspace-page__title">A calmer view of your journey</h2>
+            <p className="workspace-page__description">Choose one part of the process at a time. Your applications, offers, and onboarding actions are separated so you always know where to focus.</p>
+          </div>
+          <div className="metric-grid">
+            <div className="metric"><span className="metric__label">Applications</span><strong className="metric__value">{myApplications.length}</strong></div>
+            <div className="metric"><span className="metric__label">Interviews booked</span><strong className="metric__value">{bookedInterviews}</strong></div>
+            <div className="metric"><span className="metric__label">Offers to review</span><strong className="metric__value">{pendingOffers}</strong></div>
+            <div className="metric"><span className="metric__label">Open roles</span><strong className="metric__value">{openRoles}</strong></div>
+          </div>
+          <div className="workspace-summary__next">
+            <button type="button" className="workspace-summary__next-item" onClick={() => setActivePage('applications')}>
+              <span className="workspace-summary__next-label">View applications</span>
+              <span className="workspace-summary__next-description">Check your current stage and interview schedule.</span>
+            </button>
+            <button type="button" className="workspace-summary__next-item" onClick={() => setActivePage('offers')}>
+              <span className="workspace-summary__next-label">Review offers</span>
+              <span className="workspace-summary__next-description">Respond to an offer or continue onboarding.</span>
+            </button>
+            <button type="button" className="workspace-summary__next-item" onClick={() => setActivePage('roles')}>
+              <span className="workspace-summary__next-label">Explore open roles</span>
+              <span className="workspace-summary__next-description">Find a role and ask a question before applying.</span>
+            </button>
+          </div>
+        </div>
+      </WorkspacePage>
+      <WorkspacePage id="applications" label="Candidate applications" activePage={activePage}>
+        <div className="workspace-page__intro">
+          <p className="workspace-page__eyebrow">Application progress</p>
+          <h2 className="workspace-page__title">Applications and interviews</h2>
+          <p className="workspace-page__description">Review synchronized application stages and choose from interview times proposed by the recruiting team.</p>
+        </div>
 
       <section aria-label="Your applications" data-candidate-applications className="page-section">
         <h2 className="section-heading__title">Your applications</h2>
@@ -783,6 +989,14 @@ const CandidateView = () => {
           </div>
         )}
       </section>
+      </WorkspacePage>
+
+      <WorkspacePage id="offers" label="Offers and onboarding" activePage={activePage}>
+        <div className="workspace-page__intro">
+          <p className="workspace-page__eyebrow">Offer workspace</p>
+          <h2 className="workspace-page__title">Offers and onboarding</h2>
+          <p className="workspace-page__description">Make an offer decision first, then complete benefits and onboarding tasks only when the offer is accepted.</p>
+        </div>
 
       <section aria-label="Your offers" data-candidate-offers className="page-section">
         <h2 className="section-heading__title">Your offers</h2>
@@ -1029,6 +1243,14 @@ const CandidateView = () => {
           {myOffers.length === 0 && <p className="text-gray-500">No offers yet.</p>}
         </div>
       </section>
+      </WorkspacePage>
+
+      <WorkspacePage id="roles" label="Explore roles" activePage={activePage}>
+        <div className="workspace-page__intro">
+          <p className="workspace-page__eyebrow">Opportunity search</p>
+          <h2 className="workspace-page__title">Explore open roles</h2>
+          <p className="workspace-page__description">Browse currently open positions, apply when you are ready, and ask a role-specific question before submitting.</p>
+        </div>
 
       <section aria-label="Open roles" className="page-section">
         <h2 className="section-heading__title">Open roles</h2>
@@ -1079,6 +1301,7 @@ const CandidateView = () => {
           })}
         </div>
       </section>
+      </WorkspacePage>
     </div>
   );
 };
@@ -1098,6 +1321,7 @@ const HiringManagerView = () => {
   const profileCloseButtonRef = useRef<HTMLButtonElement>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [error, setErrorState] = useState<string | null>(null);
+  const [activePage, setActivePage] = useState('overview');
   const actor = actorContextForRole('hiring-manager');
 
   useEffect(() => {
@@ -1251,10 +1475,18 @@ const HiringManagerView = () => {
           {error}
         </div>
       )}
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2 page-section">
-        <WorkflowStatusPanel actor={actor} role="hiring-manager" />
-        <CandidateComparisonPanel actor={actor} role="hiring-manager" />
-      </div>
+      <WorkspacePageNav pages={HIRING_MANAGER_PAGES} activePage={activePage} onChange={setActivePage} />
+      <WorkspacePage id="overview" label="Hiring manager overview" activePage={activePage}>
+        <div className="workspace-page__intro">
+          <p className="workspace-page__eyebrow">Decision workspace</p>
+          <h2 className="workspace-page__title">Prepare with the right context</h2>
+          <p className="workspace-page__description">Start with the canonical workflow snapshot and explainable comparison. Open Interview feedback only when you are ready to review a specific candidate.</p>
+        </div>
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+          <WorkflowStatusPanel actor={actor} role="hiring-manager" />
+          <CandidateComparisonPanel actor={actor} role="hiring-manager" />
+        </div>
+      </WorkspacePage>
 
       {selectedProfile && (
         <div
@@ -1305,6 +1537,12 @@ const HiringManagerView = () => {
         </div>
       )}
 
+      <WorkspacePage id="interviews" label="Interview feedback" activePage={activePage}>
+        <div className="workspace-page__intro">
+          <p className="workspace-page__eyebrow">Scorecard workspace</p>
+          <h2 className="workspace-page__title">Interview feedback</h2>
+          <p className="workspace-page__description">Load the role kit, review the candidate context, and submit a validated scorecard after each booked interview.</p>
+        </div>
       <section aria-label="Interview feedback" className="page-section">
         <div className="flex items-center justify-between gap-3 mb-3">
           <h2 className="text-lg font-semibold">Interview feedback</h2>
@@ -1539,6 +1777,7 @@ const HiringManagerView = () => {
           })}
         </div>
       </section>
+      </WorkspacePage>
     </div>
   );
 };

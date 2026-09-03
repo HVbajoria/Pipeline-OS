@@ -1151,3 +1151,231 @@ label textarea {
     flex-basis: 100%;
   }
 }
+
+/* Focused workspace pages ---------------------------------------------- */
+.workspace-page-nav {
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+  border-bottom: 1px solid var(--line);
+  padding: 0 2px;
+}
+
+.workspace-page-nav__label {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--ink-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.workspace-page-nav__items {
+  display: flex;
+  min-width: 0;
+  gap: 4px;
+  overflow-x: auto;
+}
+
+.workspace-page-nav__item {
+  position: relative;
+  display: grid;
+  min-width: 148px;
+  gap: 2px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 11px 12px 12px;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  text-align: left;
+}
+
+.workspace-page-nav__item:hover {
+  background: var(--surface-subtle);
+  color: var(--ink);
+}
+
+.workspace-page-nav__item.is-active {
+  border-bottom-color: var(--primary);
+  background: linear-gradient(180deg, transparent, rgb(237 242 255 / 0.82));
+  color: var(--primary-strong);
+}
+
+.workspace-page-nav__item-label {
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.workspace-page-nav__item-description {
+  color: var(--ink-muted);
+  font-size: 10px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.workspace-page-nav__item.is-active .workspace-page-nav__item-description {
+  color: #6276b4;
+}
+
+.workspace-page {
+  min-width: 0;
+}
+
+.workspace-page[hidden] {
+  display: none !important;
+}
+
+.workspace-page > * + * {
+  margin-top: 24px;
+}
+
+.workspace-page__intro {
+  max-width: 760px;
+}
+
+.workspace-page__eyebrow {
+  margin: 0 0 5px;
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.workspace-page__title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 20px;
+  font-weight: 760;
+  letter-spacing: -0.03em;
+}
+
+.workspace-page__description {
+  margin: 6px 0 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.workspace-summary {
+  display: grid;
+  gap: 18px;
+}
+
+.workspace-summary__next {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.workspace-summary__next-item {
+  display: flex;
+  min-height: 92px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 13px;
+  background: var(--surface-subtle);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.workspace-summary__next-item:hover {
+  border-color: #b9c8eb;
+  background: var(--primary-soft);
+  transform: translateY(-1px);
+}
+
+.workspace-summary__next-label {
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.workspace-summary__next-description {
+  color: var(--ink-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.documentation-guide {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.documentation-guide__item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 15px;
+  background: var(--surface);
+}
+
+.documentation-guide__item h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.documentation-guide__item p {
+  margin: 6px 0 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.documentation-entry {
+  overflow: hidden;
+}
+
+.documentation-entry > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.documentation-entry > summary::-webkit-details-marker { display: none; }
+.documentation-entry > summary::after { content: "+"; color: var(--primary); font-size: 18px; font-weight: 400; }
+.documentation-entry[open] > summary::after { content: "−"; }
+.documentation-entry__content {
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+@media (max-width: 767px) {
+  .workspace-page-nav {
+    display: block;
+    padding: 0;
+  }
+
+  .workspace-page-nav__label {
+    padding: 0 0 8px;
+  }
+
+  .workspace-page-nav__items {
+    margin: 0 -16px;
+    padding: 0 16px;
+  }
+
+  .workspace-page-nav__item {
+    min-width: 132px;
+    padding-inline: 10px;
+  }
+
+  .workspace-summary__next,
+  .documentation-guide {
+    grid-template-columns: 1fr;
+  }
+}

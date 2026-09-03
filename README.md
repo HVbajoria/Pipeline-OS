@@ -346,8 +346,53 @@ The canonical server routes are:
 | `GET /api/state` | Returns a JSON-safe actor/resource-scoped projection when a trusted principal is installed; the actor-less serializer overload remains for local compatibility callers. The projection includes safe collections, catalogs, activity, traces, and revision. |
 | `POST /api/reset` | Restores a fresh deterministic seed and returns `{ success, revision }`. |
 | `GET /api/events` | Opens an SSE stream whose `state_changed` frames contain only the latest revision. |
+| `POST /mcp` (also `GET`/`DELETE`) | Remote Model Context Protocol endpoint (Streamable HTTP). Exposes the same 32 canonical operations as MCP tools and routes `tools/call` through `OperationService`. |
 
 Legacy routes such as `/api/jobs`, `/api/candidates/search`, `/api/applications/:id/screen`, `/api/interviews/*`, `/api/offers/*`, and their read aliases remain compatibility adapters. They translate path/body shapes and, for offer responses, legacy decision spellings; they do not contain separate business logic or mutate state directly.
+
+### Remote MCP endpoint (`/mcp`) — connecting ChatGPT and other agents
+
+`/mcp` is a thin transport adapter (`src/server/mcp.ts`) that lets a remote agent host — for example a ChatGPT connector, Claude, or any Model Context Protocol client — use PipelineOS as a tool server. It contains no business logic:
+
+- `tools/list` is projected directly from `OPERATION_REGISTRY`, so all 32 operations appear as MCP tools with their canonical JSON Schema `inputSchema`/`outputSchema`. Tool descriptions are rewritten for the model (see "Agent-facing polish" below) and include whether an operation is read-only, mutating, requires human approval, or is planable, so the model can sequence and confirm calls safely.
+- `tools/call` resolves the trusted principal with the exact same request-identity path used by the HTTP routes, then dispatches through the shared `OperationService.invoke`. Authorization, validation, lifecycle guards, idempotency, the single audit entry per call, and the structured `PipelineError` envelope are all owned by the service, identical to a UI click. Read-only tools are invoked without an idempotency key; mutating tools receive an auto-minted per-call key at the envelope boundary.
+- The transport uses Streamable HTTP in stateless mode (`sessionIdGenerator: undefined`, `enableJsonResponse: true`), which is the most compatible shape for hosted connectors. Each JSON-RPC request is self-contained and identity is resolved per request.
+- Domain and authorization failures are returned as MCP tool-call error results carrying the same structured `PipelineError` payload, rather than as transport-level exceptions, so the model can reason about the failure.
+
+The endpoint is mounted by default. It can be disabled or relocated through `PipelineApiOptions`:
+
+| Option | Default | Behavior |
+| --- | --- | --- |
+| `enableMcpEndpoint` | `true` | Set `false` to omit the `/mcp` route entirely. |
+| `mcpEndpointPath` | `/mcp` | Override the mount path. |
+
+**Trust boundary.** `/mcp` inherits the same environment-gated identity policy as the rest of the API. In non-production the demo resolver maps the known seeded `x-actor-*` identities; unknown identities fail closed. In production, arbitrary actor headers are ignored and any `tools/call` fails closed with `FORBIDDEN_ERROR` unless a trusted host resolver (`resolveTrustedPrincipal` / `trustedActorResolver`) is supplied at the composition root. Discovery (`initialize`, `tools/list`) is available without a trusted principal; execution is not. To let real recruiters and candidates connect through ChatGPT, provide a host resolver that maps the authenticated connector user to a `TrustedPrincipal` (for example via an MCP OAuth flow).
+
+Example JSON-RPC call over the endpoint:
+
+```http
+POST /mcp
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_candidates","arguments":{"query":"backend","skills":["AWS"]}}}
+```
+
+#### Agent-facing polish for the ChatGPT flow
+
+The MCP surface is tuned for a model that is acting on behalf of a real recruiter or candidate. This presentation lives in `src/server/mcpDescriptions.ts` and the tool projection in `src/server/mcp.ts`; it never changes the canonical registry, schemas, capabilities, or approval policy (the Documentation view and WebMCP keep the canonical descriptions).
+
+- **Action-oriented tool descriptions.** Each of the 32 tools carries agent-facing text that states who calls it, when to reach for it, what it needs, what it returns, and how it sequences with other tools (for example "screen before comparing", "generate a draft before sending"). MCP annotation hints are set accurately: read-only tools are `readOnlyHint: true` and `idempotentHint: true`; direct mutations are `destructiveHint: true`; every tool is `openWorldHint: false` because it acts on this system's own bounded state.
+
+- **Human-in-the-loop confirmations, enforced not just suggested.** Sensitive operations (`import_public_prospect`, `coordinate_interview_workflow`, `coordinate_onboarding_workflow`) are `planable` and approval-gated. Their descriptions tell the model to stage them with `plan_operation`, show the returned approval card to the human, and only proceed via `approve_operation_plan` + `commit_operation_plan`. This is backed by the server, not merely advised: a direct `tools/call` to one of these (especially from an `agent` identity) fails closed with `CONFLICT_ERROR` — "An approved operation plan is required" (`retryAction: plan_operation`). An agent identity also cannot approve its own plan; `approve_operation_plan`/`reject_operation_plan` require a human/recruiter principal and return `FORBIDDEN_ERROR` for agents. The full path is:
+
+  ```
+  plan_operation  ->  get_approval_card  ->  approve_operation_plan (human)  ->  commit_operation_plan
+  ```
+
+  So a connected ChatGPT cannot, for example, book an interview or import a prospect without a human approving the staged card first. Direct-mutation tools that are not planable but are still consequential (for example `send_offer`) are marked `destructiveHint: true` and their descriptions instruct the model to confirm with the human before calling.
+
+- **Consent flows for candidate/prospect data.** `search_public_candidates` is described as discovery only — it creates no candidate record and copies no private contact data. Bringing a public prospect into PipelineOS requires `import_public_prospect`, which is `consent_and_human`: its description tells the model to capture explicit consent and complete the plan/approve/commit workflow, and the server records immutable provenance. `revoke_public_prospect_consent` is surfaced as a terminal, human-approved withdrawal that applies the configured retention action.
 
 ### Actor context
 
@@ -359,6 +404,70 @@ Legacy routes such as `/api/jobs`, `/api/candidates/search`, `/api/applications/
 | WebMCP agent default | `agent` / `agent-demo` |
 
 Actor metadata is transport context, not operation input. In non-production demo mode the resolver accepts only the known seeded role/agent identities; unknown headers become an unauthenticated principal. In production, the trusted host resolver supplies the principal and arbitrary `x-actor-*` headers are ignored for authentication. `/api/state`, `/api/events`, `/api/reset`, canonical operations, compatibility aliases, and WebMCP calls use the same policy boundary. Recruiter and delegated-agent projections can include assigned resources, hiring managers receive permitted candidate/interview data but not offers or onboarding by relationship inheritance, and candidates receive open jobs plus their own application/offer/benefits/onboarding/interview records. Hidden IDs and private trace/provenance fields are not serialized.
+
+## Authentication and multi-tenancy
+
+The demo resolves identity from seeded actor headers. For real recruiters and candidates, PipelineOS ships a pluggable authentication provider (`src/server/auth/`) that maps an authenticated user to the same `TrustedPrincipal` the authorization policy already enforces. Nothing in the operation service, policy, or state projection changed: authentication only supplies a trusted principal, and the existing capability, resource-scope, approval, and tenant checks do the rest.
+
+Pass an `authProvider` to `startServer`/`createPipelineApi`. It has two independent, optional halves — web OIDC for browser users and MCP OAuth for agent connectors — and both funnel through one claims mapper so roles, capabilities, and tenant are derived identically.
+
+```ts
+import { startServer } from './server';
+import { OidcTokenVerifier } from './src/server/auth';
+
+await startServer({
+  environment: 'production',
+  authProvider: {
+    // MCP OAuth: guards /mcp with a bearer token and advertises discovery.
+    mcp: {
+      verifier: new OidcTokenVerifier({ verifyJwt /* verify signature/iss/aud/exp via your JWT lib */ }),
+      resourceUrl: 'https://pipelineos.example.com/mcp',
+      authorizationServers: ['https://auth.example.com'],
+      resourceName: 'PipelineOS'
+    },
+    // Web OIDC: interactive login for recruiters/candidates/hiring managers.
+    web: {
+      client: myOidcWebClient,          // builds the authorize URL + exchanges the code
+      cookieSecret: process.env.SESSION_SECRET!,
+      redirectUri: 'https://pipelineos.example.com/auth/callback'
+    }
+  }
+});
+```
+
+### Claims to principal
+
+`principalInputFromClaims` is the single mapping used by both paths. Given verified claims (`subject`, `tenantId`, `roles`, optional `resourceIds`, `agentCapabilities`, `consentScopes`), it produces a trusted principal in which:
+
+- **Roles drive capabilities.** The principal carries `roles`; the policy expands them through `ROLE_CAPABILITY_GRANTS`. Human recruiters/admins additionally receive the human approval capabilities. A delegated agent gets no capabilities from its role and instead uses the explicit `agentCapabilities` the host granted.
+- **Every scope is tenant-stamped.** The principal and each derived `ResourceScope` carry the same `tenantId`. This is what activates the tenant gate described below. `resourceIds` from claims bind a recruiter/agent to their assigned reqs/candidates; a candidate's scope binds `self` to their subject id.
+
+### Web OIDC login (browser)
+
+`installWebAuthRoutes` mounts the standard Authorization Code + PKCE flow:
+
+| Route | Behavior |
+| --- | --- |
+| `GET /auth/login` | Redirects to the IdP authorize endpoint (state + PKCE generated server-side). |
+| `GET /auth/callback` | Exchanges the code, verifies claims, opens an HMAC-signed httpOnly session cookie, and redirects. |
+| `POST /auth/logout` | Clears the session. |
+| `GET /auth/session` | Reports the current identity (subject, tenant, roles) — never secrets. |
+
+The OIDC network calls are injected through an `OidcWebClient` so the module stays dependency-light and testable; a production host wires in a real client (for example `openid-client`). Sessions live in an injectable `WebSessionStore` (in-memory by default; provide a durable store in production). A valid session cookie authorizes `/api/state`, operations, and every other surface exactly like any other principal.
+
+### MCP OAuth (ChatGPT and other agent connectors)
+
+When `authProvider.mcp` is set, `/mcp` becomes an OAuth 2.0 Protected Resource:
+
+- `GET /.well-known/oauth-protected-resource` (RFC 9728) advertises the resource and its authorization server(s), so a connector can discover where to send the user.
+- `/mcp` is guarded by the MCP SDK's bearer middleware. A missing or invalid token returns `401` with a `WWW-Authenticate: Bearer ... resource_metadata="…"` challenge, which is exactly what a ChatGPT connector uses to begin the OAuth flow.
+- After the token is verified, its claims become the request's `TrustedPrincipal`, so a `tools/call` is authorized, tenant-scoped, and audited under the real user's subject — not a shared demo actor.
+
+Supply a `verifier`. Use `OidcTokenVerifier` with an injected `verifyJwt` in production (validate signature, issuer, audience, and expiry against your IdP's JWKS), or `StaticClaimsTokenVerifier` for local development, the demo, and tests (a deterministic token→claims map, no crypto).
+
+### Multi-tenancy
+
+Tenant isolation is enforced by the authorization policy's scope matcher: a principal only matches a resource scope when the tenant ids agree. Because `principalInputFromClaims` stamps `tenantId` on the principal and on every scope, a recruiter in `tenant-acme` is denied (`resource_scope`) when a request targets a `tenant-globex` resource, and the actor-scoped state projection filters through the same check. Tenant ids are used only to answer allow/deny and are never leaked in decisions, errors, or serialized state. Provide durable per-tenant storage in production (the in-memory repository and session store are demo defaults).
 
 ## Guided application tour
 
