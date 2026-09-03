@@ -10,6 +10,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
   updateProfile,
   type Auth,
@@ -124,10 +125,30 @@ export async function registerWithEmail(
   return credential.user;
 }
 
-export function signInWithGoogle(): Promise<User> {
-  return signInWithPopup(firebaseAuth(), new GoogleAuthProvider()).then(
-    (credential) => credential.user
-  );
+function popupErrorCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+function shouldUseGoogleRedirect(error: unknown): boolean {
+  const code = popupErrorCode(error);
+  return code === 'auth/internal-error' || code === 'auth/popup-blocked';
+}
+
+export async function signInWithGoogle(): Promise<User> {
+  const provider = new GoogleAuthProvider();
+  try {
+    const credential = await signInWithPopup(firebaseAuth(), provider);
+    return credential.user;
+  } catch (error) {
+    if (!shouldUseGoogleRedirect(error)) throw error;
+    // Redirect auth does not depend on popup opener/third-party storage
+    // behavior. The browser returns to this app and onAuthStateChanged in
+    // main.tsx completes the existing server-session exchange.
+    await signInWithRedirect(firebaseAuth(), provider);
+    return new Promise<User>(() => undefined);
+  }
 }
 
 function parseResponseBody(response: Response): Promise<unknown> {
