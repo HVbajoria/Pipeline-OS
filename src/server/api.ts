@@ -105,7 +105,9 @@ import {
   bearerIdentityResolver,
   PROTECTED_RESOURCE_METADATA_PATH,
   createWebSessionResolver,
-  installWebAuthRoutes
+  installWebAuthRoutes,
+  createFirebaseSessionResolver,
+  installFirebaseAuthRoutes
 } from './auth';
 
 export type StateProjectionFilter<T> = (
@@ -1560,6 +1562,22 @@ export function createPipelineApi(options: PipelineApiOptions = {}): PipelineApi
   // Cap request body size so a hostile or runaway client cannot exhaust memory.
   app.use(express.json({ limit: resolveBodyLimit(options.security) }));
 
+  // Public browser configuration is emitted at request time so Docker/Render
+  // runtime environment variables work even when Vite built the static bundle
+  // before those values were available. No Admin credentials are included.
+  app.get('/config.js', (_request, response) => {
+    response
+      .type('application/javascript')
+      .send(`window.__PIPELINEOS_FIREBASE_CONFIG__=${JSON.stringify({
+        apiKey: process.env.VITE_FIREBASE_API_KEY ?? '',
+        authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN ?? '',
+        storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET ?? '',
+        messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? '',
+        projectId: process.env.VITE_FIREBASE_PROJECT_ID ?? '',
+        appId: process.env.VITE_FIREBASE_APP_ID ?? ''
+      })};`);
+  });
+
   // Operational endpoints for container orchestration and scraping. They are
   // intentionally unauthenticated and NOT rate limited (mounted before the
   // limiter) so a health probe or metrics scraper is never throttled or
@@ -1605,10 +1623,17 @@ export function createPipelineApi(options: PipelineApiOptions = {}): PipelineApi
   // resolver is memoized on the options object so every resolveRequestIdentity
   // call shares one session store; MCP bearer config guards /mcp below.
   const authProvider = options.authProvider;
+  if (authProvider?.web !== undefined && authProvider.firebase !== undefined) {
+    throw new Error('Configure either web OIDC or Firebase browser authentication, not both');
+  }
   if (authProvider?.web !== undefined) {
     const store = installWebAuthRoutes(app, authProvider.web);
     (options as PipelineApiInternalOptions)._webSessionResolver =
       createWebSessionResolver({ ...authProvider.web, store });
+  } else if (authProvider?.firebase !== undefined) {
+    const store = installFirebaseAuthRoutes(app, authProvider.firebase);
+    (options as PipelineApiInternalOptions)._webSessionResolver =
+      createFirebaseSessionResolver({ ...authProvider.firebase, store });
   }
   const mcpAuthOptions =
     authProvider === undefined ? undefined : mcpAuthOptionsFromProvider(authProvider);

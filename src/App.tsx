@@ -11,6 +11,7 @@ import GitHubProspectsPanel from './components/GitHubProspectsPanel';
 import { useStore } from './lib/store';
 import { projectActivityFeed, projectKanban } from './lib/viewModels';
 import { actorContextForRole } from './client/actorContext';
+import type { FirebaseSession } from './client/firebaseAuth';
 import { operationClient } from './client/operationClient';
 import { PipelineError } from './shared/errors';
 import { calculateOnboardingStatus } from './shared/domain/onboarding';
@@ -212,12 +213,15 @@ interface NavigationProps {
   onStartTour: () => void;
   mobileOpen: boolean;
   onClose: () => void;
+  session: FirebaseSession;
+  onSignOut: () => Promise<void>;
 }
 
-const Navigation = ({ onStartTour, mobileOpen, onClose }: NavigationProps) => {
+const Navigation = ({ onStartTour, mobileOpen, onClose, session, onSignOut }: NavigationProps) => {
   const { currentRole, setRole, resetState } = useStore();
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   const reset = async () => {
     try {
@@ -228,6 +232,15 @@ const Navigation = ({ onStartTour, mobileOpen, onClose }: NavigationProps) => {
       setResetError(errorMessage(error));
     } finally {
       setResetting(false);
+    }
+  };
+
+  const signOut = async () => {
+    try {
+      setSigningOut(true);
+      await onSignOut();
+    } finally {
+      setSigningOut(false);
     }
   };
 
@@ -258,6 +271,7 @@ const Navigation = ({ onStartTour, mobileOpen, onClose }: NavigationProps) => {
               type="button"
               key={role}
               onClick={() => { setRole(role); onClose(); }}
+              disabled={role !== 'documentation' && !session.roles.includes(role === 'hiring-manager' ? 'hiring_manager' : role) && !session.roles.includes('admin')}
               data-tour={role === 'documentation' ? 'documentation-nav' : undefined}
               aria-current={currentRole === role ? 'page' : undefined}
               className="app-nav__item"
@@ -276,6 +290,14 @@ const Navigation = ({ onStartTour, mobileOpen, onClose }: NavigationProps) => {
           <Activity className="h-4 w-4" /> {resetting ? 'Resetting demo…' : 'Reset demo state'}
         </button>
         {resetError && <p className="app-nav__error" role="alert">{resetError}</p>}
+        <div className="mt-4 border-t border-slate-700 pt-4">
+          <p className="app-nav__footer-label">Signed in</p>
+          <p className="truncate text-xs text-slate-300">{session.email ?? session.subject}</p>
+          <p className="mt-1 text-xs text-slate-400">{session.roles.join(', ')}</p>
+          <button type="button" onClick={() => void signOut()} disabled={signingOut} className="app-nav__utility mt-2">
+            <User className="h-4 w-4" /> {signingOut ? 'Signing out…' : 'Sign out'}
+          </button>
+        </div>
       </div>
     </nav>
   );
@@ -1784,9 +1806,23 @@ const HiringManagerView = () => {
 
 export interface AppProps {
   bootError?: string | null;
+  session?: FirebaseSession;
+  onSignOut?: () => Promise<void>;
 }
 
-export default function App({ bootError = null }: AppProps = {}) {
+const DEMO_APP_SESSION: FirebaseSession = {
+  authenticated: true,
+  subject: 'sarah-recruiter',
+  tenantId: 'pipelineos-demo',
+  roles: ['recruiter'],
+  email: 'demo@pipelineos.local'
+};
+
+export default function App({
+  bootError = null,
+  session = DEMO_APP_SESSION,
+  onSignOut = async () => undefined
+}: AppProps = {}) {
   const currentRole = useStore((state) => state.currentRole);
   const [tourOpen, setTourOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -1794,6 +1830,15 @@ export default function App({ bootError = null }: AppProps = {}) {
   const roleLabel = currentRole === 'hiring-manager'
     ? 'Hiring manager'
     : currentRole.charAt(0).toUpperCase() + currentRole.slice(1);
+
+  useEffect(() => {
+    const nextRole = session.roles.includes('recruiter') || session.roles.includes('admin')
+      ? 'recruiter'
+      : session.roles.includes('hiring_manager') || session.roles.includes('hiring-manager')
+        ? 'hiring-manager'
+        : 'candidate';
+    useStore.getState().setRole(nextRole);
+  }, [session]);
 
   useEffect(() => {
     if (!mobileNavOpen && !activityOpen) return undefined;
@@ -1812,6 +1857,8 @@ export default function App({ bootError = null }: AppProps = {}) {
         mobileOpen={mobileNavOpen}
         onClose={() => setMobileNavOpen(false)}
         onStartTour={() => { setTourOpen(true); setMobileNavOpen(false); }}
+        session={session}
+        onSignOut={onSignOut}
       />
       {mobileNavOpen && (
         <button

@@ -106,3 +106,32 @@ Non-secret runtime configuration (see `.env.example` for the full list):
 Secrets (via Secret Manager, never committed): `OIDC_CLIENT_SECRET`,
 `SESSION_SECRET`, and optionally `FIREBASE_SERVICE_ACCOUNT` if you cannot use
 ADC. `GITHUB_TOKEN` is optional server-only headroom for prospect search.
+
+
+## Firebase Authentication on Render
+
+The browser authentication flow supports Firebase Email/Password and Google sign-in. Configure the Firebase Console first:
+
+1. Create or select the Firebase project used by PipelineOS.
+2. Enable **Email/Password** and **Google** under **Authentication → Sign-in method**.
+3. Add `https://pipelineos-lkol.onrender.com` to **Authentication → Settings → Authorized domains**. Add your custom domain too if you use one.
+4. Register a Web App and copy its public web configuration into the Render build environment as `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_APP_ID`, and optional storage/messaging values.
+
+In Render → service → **Environment**, configure:
+
+| Variable | Value | Secret? |
+| --- | --- | --- |
+| `FIREBASE_AUTH_ENABLED` | `true` | No |
+| `FIREBASE_PROJECT_ID` | Firebase project ID | No |
+| `FIREBASE_DEFAULT_TENANT_ID` | `pipelineos-demo` or your tenant | No |
+| `FIREBASE_DEFAULT_ROLE` | `candidate` | No |
+| `SESSION_SECRET` | At least 32 random characters | Yes |
+| `FIREBASE_SERVICE_ACCOUNT` | Complete Firebase Admin service-account JSON | Yes |
+| `VITE_FIREBASE_API_KEY` | Firebase Web API key | No |
+| `VITE_FIREBASE_AUTH_DOMAIN` | Firebase Auth domain | No |
+| `VITE_FIREBASE_PROJECT_ID` | Firebase project ID | No |
+| `VITE_FIREBASE_APP_ID` | Firebase Web App ID | No |
+
+Keep `FIREBASE_SERVICE_ACCOUNT` and `SESSION_SECRET` secret. Do not commit either value or put them in browser code. The server emits the public Firebase settings through `/config.js` at runtime, so changing `VITE_*` values takes effect after the service restarts; redeploying is still recommended to keep the deployment reproducible.
+
+The default role is intentionally `candidate`. Provision recruiter and other elevated roles with Firebase Admin custom claims (`tenantId` or `tenant`, `roles`, and `resource_ids`) from a trusted admin environment. Do not let users choose those values in the UI. If `PERSISTENCE_BACKEND=memory`, sessions and application state reset when the free Render instance restarts; use the Firestore backend and the same Admin credentials when durable state is required.

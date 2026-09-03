@@ -39,3 +39,30 @@ services:
         value: memory
       - key: LOG_LEVEL
         value: info
+      # Firebase Authentication. Set the sync:false values in the Render
+      # dashboard before the next deploy. Browser VITE_* values are public Firebase
+      # config; the session secret and service-account JSON are server secrets.
+      - key: FIREBASE_AUTH_ENABLED
+        value: "true"
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_DEFAULT_TENANT_ID
+        value: pipelineos-demo
+      - key: FIREBASE_DEFAULT_ROLE
+        value: candidate
+      - key: SESSION_SECRET
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
+      - key: VITE_FIREBASE_API_KEY
+        sync: false
+      - key: VITE_FIREBASE_AUTH_DOMAIN
+        sync: false
+      - key: VITE_FIREBASE_STORAGE_BUCKET
+        sync: false
+      - key: VITE_FIREBASE_MESSAGING_SENDER_ID
+        sync: false
+      - key: VITE_FIREBASE_PROJECT_ID
+        sync: false
+      - key: VITE_FIREBASE_APP_ID
+        sync: false

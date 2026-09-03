@@ -10,9 +10,11 @@
 
 import type { OAuthTokenVerifier } from '@modelcontextprotocol/sdk/server/auth/provider.js';
 
+import type { FirebaseAuthOptions } from './firebase';
 import type { McpAuthOptions } from './mcpAuth';
 import type { WebAuthOptions } from './webSession';
 
+export * from './firebase';
 export * from './identityClaims';
 export * from './tokenVerifier';
 export * from './mcpAuth';
@@ -30,8 +32,10 @@ export interface AuthProvider {
     resourceName?: string;
     scopesSupported?: readonly string[];
   };
-  /** Optional interactive web OIDC login for browser users. */
+  /** Optional interactive web OIDC login for human users. */
   web?: WebAuthOptions;
+  /** Optional Firebase Authentication session bridge for browser users. */
+  firebase?: FirebaseAuthOptions;
 }
 
 /** Narrow the MCP config into the McpAuthOptions the middleware expects. */

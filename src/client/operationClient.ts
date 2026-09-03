@@ -276,6 +276,7 @@ export class OperationClient {
     };
     const requestInit: RequestInit = {
       method: 'POST',
+      credentials: 'include',
       headers: transportHeaders(resolvedActor, metadata),
       body: JSON.stringify(requestBody),
       signal: args.signal

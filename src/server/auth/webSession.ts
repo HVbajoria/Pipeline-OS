@@ -128,12 +128,12 @@ function sign(value: string, secret: string): string {
 }
 
 /** Build the signed cookie value `<sessionId>.<hmac>`. */
-function signSessionId(sessionId: string, secret: string): string {
+export function signSessionId(sessionId: string, secret: string): string {
   return `${sessionId}.${sign(sessionId, secret)}`;
 }
 
 /** Verify and extract a session id from a signed cookie value. */
-function verifySignedSessionId(
+export function verifySignedSessionId(
   signed: string,
   secret: string
 ): string | undefined {
@@ -148,7 +148,7 @@ function verifySignedSessionId(
   return timingSafeEqual(provided, expected) ? sessionId : undefined;
 }
 
-function parseCookies(request: Request): Record<string, string> {
+export function parseCookies(request: Request): Record<string, string> {
   const header = request.headers.cookie;
   if (typeof header !== 'string' || header.length === 0) return {};
   const result: Record<string, string> = {};
@@ -162,7 +162,7 @@ function parseCookies(request: Request): Record<string, string> {
   return result;
 }
 
-function setSessionCookie(
+export function setSessionCookie(
   response: Response,
   value: string,
   maxAgeMs: number,
@@ -179,7 +179,7 @@ function setSessionCookie(
   response.append('Set-Cookie', attributes.join('; '));
 }
 
-function clearSessionCookie(response: Response, secure: boolean): void {
+export function clearSessionCookie(response: Response, secure: boolean): void {
   const attributes = [
     `${SESSION_COOKIE_NAME}=`,
     'HttpOnly',
@@ -196,7 +196,9 @@ function clearSessionCookie(response: Response, secure: boolean): void {
  * there is no valid session. This is used by the request-identity path so the
  * web UI is authorized exactly like every other surface.
  */
-export function createWebSessionResolver(options: WebAuthOptions): (
+export function createWebSessionResolver(
+  options: Pick<WebAuthOptions, 'cookieSecret' | 'store'>
+): (
   request: Request
 ) => Promise<TrustedPrincipal | undefined> {
   const store = options.store ?? new InMemoryWebSessionStore();

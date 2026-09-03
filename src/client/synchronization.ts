@@ -87,6 +87,7 @@ async function fetchProjection(
   const actor = resolveSynchronizationActor(options);
   const response = await fetcher(`${options.baseUrl ?? ''}/api/state`, {
     method: 'GET',
+    credentials: 'include',
     headers: actorHeaders(actor)
   });
   const body = await parseBody(response);
@@ -241,7 +242,7 @@ export class SynchronizationController {
     const factory =
       this.options.eventSourceFactory ??
       (typeof globalThis.EventSource === 'function'
-        ? (url: string) => new globalThis.EventSource(url)
+        ? (url: string) => new globalThis.EventSource(url, { withCredentials: true })
         : undefined);
     if (!factory) return;
 

@@ -136,6 +136,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const actor = actorContextForRole(get().currentRole);
     const response = await fetch('/api/state', {
       method: 'GET',
+      credentials: 'include',
       headers: {
         accept: 'application/json',
         'x-actor-type': actor.actorType,
@@ -152,6 +153,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const actor = actorContextForRole(get().currentRole);
     const resetResponse = await fetch('/api/reset', {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'content-type': 'application/json',
         'x-actor-type': actor.actorType,

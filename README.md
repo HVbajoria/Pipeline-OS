@@ -731,3 +731,27 @@ pipelineos/
 ## License and scope
 
 This repository is a deterministic demonstration of a shared human-and-agent recruiting workflow. It intentionally uses an in-memory repository and demo actor identities. Replace the repository, actor resolver, and hosting configuration before treating it as a production recruiting system.
+
+
+## Firebase Authentication
+
+The production browser flow supports Firebase Email/Password and Google sign-in. The browser Firebase SDK signs the user in, then exchanges the verified ID token at `POST /auth/firebase/session`. PipelineOS verifies the token with the Firebase Admin SDK and creates the existing secure, `httpOnly` `pipelineos_session` cookie. API requests, state refreshes, and SSE synchronization use that cookie; tokens are not placed in URLs.
+
+Enable **Email/Password** and **Google** under Firebase Console → Authentication → Sign-in method. Configure the browser values as `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_APP_ID`, and the optional storage/messaging values. These browser settings are public Firebase configuration, not Admin credentials.
+
+The server additionally requires `FIREBASE_AUTH_ENABLED=true`, a strong `SESSION_SECRET` of at least 32 characters, and a server-only `FIREBASE_SERVICE_ACCOUNT` secret or Application Default Credentials. `FIREBASE_DEFAULT_TENANT_ID` and `FIREBASE_DEFAULT_ROLE=candidate` are safe first-time-user fallbacks. Do not use a default recruiter or admin role for a multi-user deployment.
+
+Authentication and authorization are separate. Recruiter, hiring-manager, interviewer, and admin access must be provisioned with Firebase Admin custom claims, for example:
+
+```json
+{
+  "tenantId": "tenant-acme",
+  "roles": ["recruiter"],
+  "resource_ids": {
+    "job": ["job-1"],
+    "candidate": ["cand-1", "cand-2", "cand-3"]
+  }
+}
+```
+
+Set claims from a trusted server-side/admin environment only. Never accept roles, tenant IDs, or resource assignments from the browser. For a candidate to use the seeded demo profile, include the appropriate candidate resource assignment in `resource_ids`; production deployments should link Firebase UIDs to real candidate records rather than sharing the demo ID.

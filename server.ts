@@ -27,7 +27,10 @@ import {
   type ProductionTrustedPrincipalResolver,
   type TrustedActorResolver
 } from './src/server/authorization';
-import type { AuthProvider } from './src/server/auth';
+import {
+  firebaseAuthOptionsFromEnv,
+  type AuthProvider
+} from './src/server/auth';
 import {
   createDurablePersistence,
   durablePersistenceAvailable,
@@ -141,10 +144,19 @@ export async function createServerApp(
       approvalTtlMs: options.approvalTtlMs,
       traceIdentifiers: options.traceIdentifiers
     });
-  // When durable persistence is active and a web OIDC provider is configured,
-  // back its session store with Firestore (unless the caller already supplied
-  // one) so browser sessions survive restarts and work across instances.
+  // Compose Firebase Authentication from environment when no host-specific
+  // provider was injected. Production stays fail-closed unless this is
+  // explicitly enabled with a server-side Admin SDK credential and session
+  // secret.
   let authProvider = options.authProvider;
+  if (authProvider === undefined) {
+    const firebase = firebaseAuthOptionsFromEnv();
+    if (firebase !== undefined) authProvider = { firebase };
+  }
+  // When durable persistence is active and a browser auth provider is
+  // configured, back its session store with Firestore (unless the caller
+  // already supplied one) so sessions survive restarts and work across
+  // instances.
   if (
     durablePersistence !== undefined &&
     authProvider?.web !== undefined &&
@@ -153,6 +165,16 @@ export async function createServerApp(
     authProvider = {
       ...authProvider,
       web: { ...authProvider.web, store: durablePersistence.sessionStore }
+    };
+  }
+  if (
+    durablePersistence !== undefined &&
+    authProvider?.firebase !== undefined &&
+    authProvider.firebase.store === undefined
+  ) {
+    authProvider = {
+      ...authProvider,
+      firebase: { ...authProvider.firebase, store: durablePersistence.sessionStore }
     };
   }
 
