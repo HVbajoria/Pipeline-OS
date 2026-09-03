@@ -1,0 +1,41 @@
+# Render Blueprint for PipelineOS
+# Docs: https://render.com/docs/blueprint-spec
+#
+# This deploys the app as a Docker web service built from the repo Dockerfile.
+# The container is a single always-on Node process that serves the SPA plus the
+# /api and /mcp surfaces, so it must run as a "web" service (not static) to keep
+# the SSE stream (/api/events) and the maintenance scheduler alive.
+#
+# To deploy: push this file to the default branch, then in the Render dashboard
+# choose "New +" -> "Blueprint" and point it at this repository.
+
+services:
+  - type: web
+    name: pipelineos
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # Free tier: spins down after ~15 min idle and cold-starts on next request.
+    # Change to "starter" for an always-on instance (paid).
+    plan: free
+    region: oregon
+    branch: main
+    # Render's platform health check. The app exposes a liveness endpoint here.
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # The container listens on $PORT and binds 0.0.0.0 when NODE_ENV=production.
+      # Render injects PORT automatically; the Dockerfile defaults to 8080 and
+      # server.ts reads process.env.PORT, so no explicit PORT is required. We set
+      # it explicitly to match the Dockerfile's EXPOSE for clarity.
+      - key: PORT
+        value: "8080"
+      - key: NODE_ENV
+        value: production
+      # Demo-safe default: in-memory state (resets when the instance sleeps or
+      # restarts). Switch to "firestore" and add Firebase credentials for durable,
+      # cross-restart state.
+      - key: PERSISTENCE_BACKEND
+        value: memory
+      - key: LOG_LEVEL
+        value: info
