@@ -1,7 +1,7 @@
 import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
-import FirebaseAuthScreen from './components/FirebaseAuthScreen';
+import FirebaseAuthScreen, { friendlyAuthError } from './components/FirebaseAuthScreen';
 import PipelineLogo from './components/PipelineLogo';
 import {
   establishServerSession,
@@ -102,7 +102,7 @@ function AuthenticatedRoot() {
             });
         },
         (error) => {
-          if (active) setState({ status: 'error', error: error.message });
+          if (active) setState({ status: 'signed_out', error: friendlyAuthError(error) });
         }
       );
     } catch (error) {
@@ -133,7 +133,7 @@ function AuthenticatedRoot() {
       </main>
     );
   }
-  return <FirebaseAuthScreen />;
+  return <FirebaseAuthScreen initialError={state.error} />;
 }
 
 createRoot(document.getElementById('root')!).render(

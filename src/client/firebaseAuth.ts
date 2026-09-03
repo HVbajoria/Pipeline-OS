@@ -82,6 +82,37 @@ function firebaseConfig(): FirebaseConfig {
 let app: FirebaseApp | undefined;
 let auth: Auth | undefined;
 
+const googleRedirectPendingKey = 'pipelineos:google-redirect-pending';
+
+function setGoogleRedirectPending(): void {
+  try {
+    window.sessionStorage.setItem(googleRedirectPendingKey, '1');
+  } catch {
+    // Storage can be unavailable in privacy-restricted browser contexts. The
+    // auth observer can still receive the signed-in user after navigation.
+  }
+}
+
+function clearGoogleRedirectPending(): void {
+  try {
+    window.sessionStorage.removeItem(googleRedirectPendingKey);
+  } catch {
+    // Ignore storage failures; they must not prevent authentication cleanup.
+  }
+}
+
+function claimGoogleRedirectPending(): boolean {
+  try {
+    if (window.sessionStorage.getItem(googleRedirectPendingKey) !== '1') return false;
+    // Remove before starting the async Firebase call so React StrictMode or a
+    // second observer cannot consume the same redirect result twice.
+    window.sessionStorage.removeItem(googleRedirectPendingKey);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function firebaseAuthenticationConfigured(): boolean {
   return (
     configValue('VITE_FIREBASE_API_KEY', 'apiKey') !== undefined &&
@@ -116,15 +147,18 @@ export function observeFirebaseUser(
   });
 
   // A redirect sign-in can complete after the initial auth observer is
-  // registered. Consume its result explicitly so the returned Google user is
-  // passed into the same server-session exchange as popup sign-in.
-  void getRedirectResult(currentAuth)
-    .then((result) => {
-      if (result?.user !== undefined) notify(result.user);
-    })
-    .catch((error: unknown) => {
-      onError?.(error instanceof Error ? error : new Error('Firebase redirect authentication failed'));
-    });
+  // registered. Only consume a result when this tab explicitly initiated a
+  // redirect; otherwise stale Firebase redirect state can surface an
+  // auth/internal-error on every normal page load.
+  if (claimGoogleRedirectPending()) {
+    void getRedirectResult(currentAuth)
+      .then((result) => {
+        if (result?.user !== undefined) notify(result.user);
+      })
+      .catch((error: unknown) => {
+        onError?.(error instanceof Error ? error : new Error('Firebase redirect authentication failed'));
+      });
+  }
 
   return unsubscribe;
 }
@@ -166,10 +200,15 @@ export async function signInWithGoogle(): Promise<User> {
     return credential.user;
   } catch (error) {
     if (!shouldUseGoogleRedirect(error)) throw error;
-    // Redirect auth does not depend on popup opener/third-party storage
-    // behavior. The browser returns to this app and onAuthStateChanged in
-    // main.tsx completes the existing server-session exchange.
-    await signInWithRedirect(firebaseAuth(), provider);
+    // Mark the redirect before navigation so the returning page knows it
+    // should consume Firebase's one-shot redirect result.
+    setGoogleRedirectPending();
+    try {
+      await signInWithRedirect(firebaseAuth(), provider);
+    } catch (redirectError) {
+      clearGoogleRedirectPending();
+      throw redirectError;
+    }
     return new Promise<User>(() => undefined);
   }
 }

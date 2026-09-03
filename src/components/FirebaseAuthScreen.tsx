@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import AuthSectionThree, { type AuthSectionMode } from './ui/auth-section-3';
 import {
   registerWithEmail,
@@ -6,7 +6,7 @@ import {
   signInWithGoogle
 } from '../client/firebaseAuth';
 
-function friendlyAuthError(error: unknown): string {
+export function friendlyAuthError(error: unknown): string {
   const code =
     typeof error === 'object' && error !== null && 'code' in error
       ? String((error as { code?: unknown }).code)
@@ -38,14 +38,22 @@ function friendlyAuthError(error: unknown): string {
   }
 }
 
-export default function FirebaseAuthScreen() {
+interface FirebaseAuthScreenProps {
+  initialError?: string;
+}
+
+export default function FirebaseAuthScreen({ initialError }: FirebaseAuthScreenProps = {}) {
   const [mode, setMode] = useState<AuthSectionMode>('signin');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError ?? null);
+
+  useEffect(() => {
+    if (initialError !== undefined) setError(initialError);
+  }, [initialError]);
 
   const changeMode = (nextMode: AuthSectionMode) => {
     setMode(nextMode);
