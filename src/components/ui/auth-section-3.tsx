@@ -274,7 +274,7 @@ function InputField({
       <label className="text-xs font-semibold text-black/60 dark:text-white/60">
         {label}
       </label>
-      <div className="relative flex h-11 items-center rounded-lg border border-black/15 bg-white px-3.5 transition-colors focus-within:border-black/50 dark:border-white/10 dark:bg-white/5 dark:focus-within:border-white/40">
+      <div className="relative flex h-11 items-center rounded-lg border border-white/15 bg-black px-3.5 transition-colors focus-within:border-white/55 focus-within:ring-1 focus-within:ring-white/20">
         <input
           type={isPassword && showPassword ? 'text' : type}
           value={value}
@@ -284,7 +284,7 @@ function InputField({
           disabled={disabled}
           required
           minLength={isPassword ? 6 : undefined}
-          className="w-full bg-transparent text-sm text-black outline-none placeholder:text-black/30 disabled:cursor-wait disabled:opacity-60 dark:text-white dark:placeholder:text-white/30"
+          className="w-full bg-transparent text-sm text-white caret-white outline-none placeholder:text-white/45 disabled:cursor-wait disabled:opacity-60"
         />
         {isPassword && (
           <button
@@ -292,7 +292,7 @@ function InputField({
             onClick={() => setShowPassword((visible) => !visible)}
             disabled={disabled}
             aria-label={showPassword ? 'Hide password' : 'Show password'}
-            className="ml-2 shrink-0 text-black/40 transition-colors hover:text-black disabled:opacity-50 dark:text-white/40 dark:hover:text-white"
+            className="ml-2 shrink-0 text-white/55 transition-colors hover:text-white disabled:opacity-50"
           >
             {showPassword ? <EyeOff className="size-4" aria-hidden="true" /> : <Eye className="size-4" aria-hidden="true" />}
           </button>
