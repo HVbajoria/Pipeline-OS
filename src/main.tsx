@@ -2,6 +2,7 @@ import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import FirebaseAuthScreen from './components/FirebaseAuthScreen';
+import PipelineLogo from './components/PipelineLogo';
 import {
   establishServerSession,
   firebaseAuthenticationConfigured,
@@ -23,7 +24,8 @@ function LoadingScreen() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
       <div className="text-center">
-        <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+        <PipelineLogo tone="dark" className="pipeline-logo--centered" />
+        <div className="mx-auto mb-4 mt-8 h-10 w-10 animate-spin rounded-full border-2 border-white/30 border-t-white" />
         <p className="text-sm text-white/80">Preparing your secure workspace…</p>
       </div>
     </main>
@@ -121,7 +123,8 @@ function AuthenticatedRoot() {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 text-white">
         <div className="max-w-lg rounded-2xl bg-white p-6 text-slate-900 shadow-2xl">
-          <h1 className="text-xl font-bold">Authentication setup required</h1>
+          <PipelineLogo tone="light" />
+          <h1 className="mt-6 text-xl font-bold">Authentication setup required</h1>
           <p className="mt-3 text-sm text-slate-600">{state.error}</p>
           <p className="mt-3 text-sm text-slate-600">
             Enable Email/Password and Google in Firebase Authentication, configure the Firebase web settings in Render, and redeploy the service.

@@ -114,6 +114,78 @@ summary:focus-visible {
   border-width: 2px;
 }
 
+/* Shared PipelineOS branding ------------------------------------------ */
+.pipeline-logo {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.pipeline-logo__mark {
+  display: block;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 6px 12px rgb(30 64 175 / 0.24));
+}
+
+.pipeline-logo__copy {
+  min-width: 0;
+}
+
+.pipeline-logo__name {
+  display: block;
+  font-size: 16px;
+  font-weight: 780;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+}
+
+.pipeline-logo__caption {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.pipeline-logo--dark .pipeline-logo__name {
+  color: #f8fafc;
+}
+
+.pipeline-logo--dark .pipeline-logo__caption {
+  color: #8ea0b9;
+}
+
+.pipeline-logo--light .pipeline-logo__name {
+  color: var(--ink);
+}
+
+.pipeline-logo--light .pipeline-logo__caption {
+  color: var(--ink-muted);
+}
+
+.pipeline-logo--compact {
+  gap: 8px;
+}
+
+.pipeline-logo--compact .pipeline-logo__mark {
+  width: 32px;
+  height: 32px;
+}
+
+.pipeline-logo--compact .pipeline-logo__name {
+  font-size: 14px;
+}
+
+.pipeline-logo--centered,
+.pipeline-logo--auth {
+  justify-content: center;
+}
+
 /* Application shell ----------------------------------------------------- */
 .app-shell {
   display: flex;

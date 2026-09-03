@@ -11,6 +11,7 @@ import {
   createUserWithEmailAndPassword,
   signInWithPopup,
   signOut,
+  updateProfile,
   type Auth,
   type User,
   type Unsubscribe
@@ -110,10 +111,17 @@ export function signInWithEmail(email: string, password: string): Promise<User> 
   );
 }
 
-export function registerWithEmail(email: string, password: string): Promise<User> {
-  return createUserWithEmailAndPassword(firebaseAuth(), email, password).then(
-    (credential) => credential.user
-  );
+export async function registerWithEmail(
+  email: string,
+  password: string,
+  displayName?: string
+): Promise<User> {
+  const credential = await createUserWithEmailAndPassword(firebaseAuth(), email, password);
+  const name = displayName?.trim();
+  if (name !== undefined && name.length > 0) {
+    await updateProfile(credential.user, { displayName: name });
+  }
+  return credential.user;
 }
 
 export function signInWithGoogle(): Promise<User> {

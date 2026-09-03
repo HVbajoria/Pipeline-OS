@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { Activity, Book, Briefcase, CheckCircle, FileText, HelpCircle, Menu, User, Users, X } from 'lucide-react';
+import { Activity, Book, CheckCircle, FileText, HelpCircle, Menu, User, Users, X } from 'lucide-react';
 import ActivityTracePanel from './components/ActivityTracePanel';
 import { AppTour } from './components/AppTour';
 import ApprovalCardsPanel from './components/ApprovalCardsPanel';
@@ -8,6 +8,7 @@ import LivePublicJobsPanel from './components/LivePublicJobsPanel';
 import WorkflowCoordinatorPanel from './components/WorkflowCoordinatorPanel';
 import WorkflowStatusPanel from './components/WorkflowStatusPanel';
 import GitHubProspectsPanel from './components/GitHubProspectsPanel';
+import PipelineLogo from './components/PipelineLogo';
 import { useStore } from './lib/store';
 import { projectActivityFeed, projectKanban } from './lib/viewModels';
 import { actorContextForRole } from './client/actorContext';
@@ -254,11 +255,7 @@ const Navigation = ({ onStartTour, mobileOpen, onClose, session, onSignOut }: Na
   return (
     <nav aria-label="Primary navigation" className={`app-nav${mobileOpen ? ' is-open' : ''}`}>
       <div data-tour="brand" className="app-nav__brand">
-        <span className="app-nav__brand-mark" aria-hidden="true"><Briefcase className="h-4 w-4" /></span>
-        <span className="app-nav__brand-copy">
-          <span className="app-nav__brand-name">PipelineOS</span>
-          <span className="app-nav__brand-caption">Recruiting operations</span>
-        </span>
+        <PipelineLogo tone="dark" />
         <button type="button" className="app-nav__close" onClick={onClose} aria-label="Close navigation">
           <X className="h-4 w-4" />
         </button>

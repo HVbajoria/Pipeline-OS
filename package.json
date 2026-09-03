@@ -21,6 +21,7 @@
   "dependencies": {
     "@google/genai": "2.19.0",
     "@modelcontextprotocol/sdk": "1.30.0",
+    "@paper-design/shaders-react": "0.0.80",
     "@tailwindcss/vite": "4.3.3",
     "@vitejs/plugin-react": "5.2.0",
     "axios": "1.20.0",
