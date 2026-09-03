@@ -5,6 +5,7 @@ import {
 } from 'firebase/app';
 import {
   getAuth,
+  getRedirectResult,
   GoogleAuthProvider,
   onAuthStateChanged,
   signInWithEmailAndPassword,
@@ -101,9 +102,31 @@ export function observeFirebaseUser(
   callback: (user: User | null) => void,
   onError?: (error: Error) => void
 ): Unsubscribe {
-  return onAuthStateChanged(firebaseAuth(), callback, (error) => {
+  const currentAuth = firebaseAuth();
+  let notifiedUid: string | null | undefined;
+  const notify = (user: User | null) => {
+    const uid = user?.uid ?? null;
+    if (notifiedUid === uid) return;
+    notifiedUid = uid;
+    callback(user);
+  };
+
+  const unsubscribe = onAuthStateChanged(currentAuth, notify, (error) => {
     onError?.(error instanceof Error ? error : new Error('Firebase authentication failed'));
   });
+
+  // A redirect sign-in can complete after the initial auth observer is
+  // registered. Consume its result explicitly so the returned Google user is
+  // passed into the same server-session exchange as popup sign-in.
+  void getRedirectResult(currentAuth)
+    .then((result) => {
+      if (result?.user !== undefined) notify(result.user);
+    })
+    .catch((error: unknown) => {
+      onError?.(error instanceof Error ? error : new Error('Firebase redirect authentication failed'));
+    });
+
+  return unsubscribe;
 }
 
 export function signInWithEmail(email: string, password: string): Promise<User> {
