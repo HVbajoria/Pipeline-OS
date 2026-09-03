@@ -246,8 +246,8 @@ export function htmlToPlainText(value: string): string {
     decoded = decodeHtmlEntities(decoded);
   }
   decoded = decoded
-    .replace(/<script[\s\S]*?<\/script>/giu, ' ')
-    .replace(/<style[\s\S]*?<\/style>/giu, ' ')
+    .replace(/<script\b[\s\S]*?<\/script(?:\s+[^>]*)?\s*>/giu, ' ')
+    .replace(/<style\b[\s\S]*?<\/style(?:\s+[^>]*)?\s*>/giu, ' ')
     .replace(/<br\s*\/?>/giu, '\n')
     .replace(/<\/p\s*>/giu, '\n')
     .replace(/<\/li\s*>/giu, '\n')
