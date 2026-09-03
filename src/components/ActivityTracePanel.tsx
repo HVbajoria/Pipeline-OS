@@ -36,13 +36,13 @@ export function ActivityTracePanel({ entry }: ActivityTracePanelProps) {
 
   return (
     <div
-      className="mt-2 border-t border-slate-100 pt-2"
+      className="activity-trace-panel"
       data-activity-trace
       data-trace-id={entry.traceId}
     >
       <button
         type="button"
-        className="text-xs font-medium text-blue-700 hover:text-blue-900"
+        className="trace-toggle ui-button ui-button--ghost"
         aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
         data-trace-toggle

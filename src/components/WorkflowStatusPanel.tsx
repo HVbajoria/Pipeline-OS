@@ -45,7 +45,7 @@ function WorkflowError({
     <div
       role="alert"
       data-workflow-status-error={state}
-      className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+      className="callout callout--danger"
     >
       <strong className="capitalize">{state}:</strong> {canonicalReadErrorMessage(error, state)}
     </div>
@@ -102,7 +102,7 @@ function WorkflowResult({ output }: { output: WorkflowStatusViewModel }) {
         </p>
       ) : (
         <>
-          <section data-workflow-status-counts className="rounded-lg border border-gray-200 bg-white p-3">
+          <section data-workflow-status-counts className="panel panel--compact">
             <h4 className="font-medium text-gray-900">Application counts</h4>
             <dl className="mt-2 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
               {counts.map(([status, count]) => (
@@ -119,7 +119,7 @@ function WorkflowResult({ output }: { output: WorkflowStatusViewModel }) {
               <article
                 key={application.applicationId}
                 data-workflow-application={application.applicationId}
-                className="rounded-lg border border-gray-200 bg-white p-3 text-sm shadow-sm"
+                className="panel panel--compact"
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
@@ -240,7 +240,7 @@ export function WorkflowStatusPanel({
           Read the actor-scoped status snapshot from the server, including canonical blockers, next actions, counts, and pending approvals.
         </p>
       </div>
-      <form onSubmit={(event) => void runStatus(event)} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm space-y-3">
+      <form onSubmit={(event) => void runStatus(event)} className="panel panel--padded space-y-4">
         <label className="block text-sm text-gray-700">
           Job scope
           <select aria-label="Workflow status job" value={jobId} onChange={(event) => setJobId(event.target.value)} className="mt-1 w-full rounded border p-2">
@@ -255,7 +255,7 @@ export function WorkflowStatusPanel({
             <option value="full">Full</option>
           </select>
         </label>
-        <button type="submit" disabled={query.kind === 'loading'} className="rounded bg-indigo-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
+        <button type="submit" disabled={query.kind === 'loading'} className="ui-button ui-button--primary">
           {query.kind === 'loading' ? 'Loading status…' : 'Load workflow status'}
         </button>
       </form>

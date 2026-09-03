@@ -55,7 +55,7 @@ export function LivePublicJobsPanel({
   return (
     <section
       aria-labelledby="live-public-jobs-heading"
-      className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm"
+      className="panel panel--padded"
     >
       <div className="flex flex-wrap justify-between items-start gap-3">
         <div>
@@ -70,7 +70,7 @@ export function LivePublicJobsPanel({
           type="button"
           onClick={() => void load(true)}
           disabled={loading}
-          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-100 text-slate-700 text-sm disabled:opacity-50"
+          className="ui-button ui-button--secondary"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           {loading ? 'Loading…' : 'Refresh'}
@@ -116,7 +116,7 @@ export function LivePublicJobsPanel({
               {result.listings.map((listing) => (
                 <article
                   key={`${listing.sourceName}-${listing.externalId ?? listing.canonicalSourceUrl}`}
-                  className="border border-gray-200 rounded-lg p-4"
+                  className="panel panel--compact"
                 >
                   <div className="flex justify-between items-start gap-3">
                     <div>

@@ -100,19 +100,19 @@ function errorText(error: unknown): string {
 function statusClasses(state: ApprovalCardUiState): string {
   switch (state) {
     case 'pending':
-      return 'bg-amber-100 text-amber-800';
+      return 'status-pill status-pill--warning';
     case 'approved':
-      return 'bg-blue-100 text-blue-800';
+      return 'status-pill status-pill--primary';
     case 'committed':
-      return 'bg-green-100 text-green-800';
+      return 'status-pill status-pill--success';
     case 'rejected':
-      return 'bg-gray-200 text-gray-700';
+      return 'status-pill status-pill--neutral';
     case 'expired':
-      return 'bg-red-100 text-red-800';
+      return 'status-pill status-pill--danger';
     case 'stale':
-      return 'bg-orange-100 text-orange-800';
+      return 'status-pill status-pill--warning';
     case 'replayed':
-      return 'bg-purple-100 text-purple-800';
+      return 'status-pill status-pill--primary';
   }
 }
 
@@ -179,8 +179,8 @@ function MessageList({
 }) {
   if (items.length === 0) return null;
   const classes = tone === 'blocker'
-    ? 'bg-red-50 border-red-200 text-red-800'
-    : 'bg-amber-50 border-amber-200 text-amber-800';
+    ? 'callout callout--danger'
+    : 'callout callout--warning';
   return (
     <section data-testid={testId} className={`rounded-lg border p-3 text-sm ${classes}`}>
       <h4 className="font-medium">{title}</h4>
@@ -218,7 +218,7 @@ function ApprovalCardView({
       id={`approval-card-${card.id}`}
       data-approval-card-id={card.id}
       data-approval-card-state={view.state}
-      className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4"
+      className="panel panel--padded space-y-4"
     >
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -228,7 +228,7 @@ function ApprovalCardView({
         <span
           role="status"
           data-approval-status={view.state}
-          className={`rounded-full px-2 py-1 text-xs font-medium capitalize ${statusClasses(view.state)}`}
+          className={statusClasses(view.state)}
         >
           {view.state}
         </span>
@@ -316,7 +316,7 @@ function ApprovalCardView({
                 data-approval-action="approve"
                 disabled={pendingAction}
                 onClick={() => onAction('approve', card)}
-                className="rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                className="ui-button ui-button--primary"
               >
                 {pendingAction ? 'Working…' : actionLabel('approve')}
               </button>
@@ -325,7 +325,7 @@ function ApprovalCardView({
                 data-approval-action="reject"
                 disabled={pendingAction}
                 onClick={() => onAction('reject', card)}
-                className="rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 disabled:opacity-50"
+                className="ui-button ui-button--secondary"
               >
                 {actionLabel('reject')}
               </button>
@@ -337,7 +337,7 @@ function ApprovalCardView({
               data-approval-action="commit"
               disabled={pendingAction}
               onClick={() => onAction('commit', card)}
-              className="rounded bg-green-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+              className="ui-button ui-button--success"
             >
               {pendingAction ? 'Working…' : actionLabel('commit')}
             </button>
@@ -397,7 +397,7 @@ export function ApprovalCardsPanel({
         </p>
       </div>
       {views.length === 0 ? (
-        <p data-approval-cards-empty className="rounded-lg border border-dashed border-gray-300 bg-white p-5 text-sm text-gray-500">
+        <p data-approval-cards-empty className="empty-state">
           No approval cards are visible for this actor.
         </p>
       ) : (

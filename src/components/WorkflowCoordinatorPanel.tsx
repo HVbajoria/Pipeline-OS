@@ -125,7 +125,7 @@ export default function WorkflowCoordinatorPanel({
       aria-label="Workflow coordinators"
       data-workflow-coordinators
       data-workflow-role={role}
-      className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm space-y-5"
+      className="panel panel--padded space-y-5"
     >
       <div>
         <h2 className="text-lg font-semibold">Workflow coordinators</h2>
@@ -134,7 +134,7 @@ export default function WorkflowCoordinatorPanel({
         </p>
       </div>
       {error && (
-        <div data-workflow-coordinator-error className="rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+        <div data-workflow-coordinator-error className="callout callout--danger">
           {error}
         </div>
       )}
@@ -164,7 +164,7 @@ export default function WorkflowCoordinatorPanel({
                       type="button"
                       data-coordinate-interview="propose"
                       onClick={() => void coordinateInterview(application.id, 'propose_slots')}
-                      className="rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white"
+                      className="ui-button ui-button--primary"
                     >
                       Coordinate slots
                     </button>
@@ -186,7 +186,7 @@ export default function WorkflowCoordinatorPanel({
                         type="button"
                         data-coordinate-interview="book"
                         onClick={() => void coordinateInterview(application.id, 'book_slot', interview.slot)}
-                        className="rounded border border-indigo-300 px-2 py-1 text-xs text-indigo-700"
+                        className="ui-button ui-button--soft"
                       >
                         Book {new Date(interview.slot).toLocaleString()}
                       </button>
@@ -218,7 +218,7 @@ export default function WorkflowCoordinatorPanel({
                         type="button"
                         data-coordinate-onboarding="initialize"
                         onClick={() => void coordinateOnboarding(offer.id, 'initialize_checklist')}
-                        className="rounded bg-orange-600 px-2 py-1 text-xs font-medium text-white"
+                        className="ui-button ui-button--warning"
                       >
                         Coordinate checklist
                       </button>
@@ -241,7 +241,7 @@ export default function WorkflowCoordinatorPanel({
                               type="button"
                               data-coordinate-onboarding="start-task"
                               onClick={() => void coordinateOnboarding(offer.id, 'update_task', task.id, 'in_progress')}
-                              className="rounded border border-orange-300 px-2 py-1 text-orange-700"
+                              className="ui-button ui-button--soft"
                             >
                               Start
                             </button>
@@ -251,7 +251,7 @@ export default function WorkflowCoordinatorPanel({
                               type="button"
                               data-coordinate-onboarding="complete-task"
                               onClick={() => void coordinateOnboarding(offer.id, 'update_task', task.id, 'complete')}
-                              className="rounded border border-green-300 px-2 py-1 text-green-700"
+                              className="ui-button ui-button--success"
                             >
                               Complete
                             </button>

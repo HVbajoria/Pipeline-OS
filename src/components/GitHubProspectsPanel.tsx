@@ -121,7 +121,7 @@ function ProspectCard({
   selected: boolean;
 }) {
   return (
-    <article className={`border rounded-lg p-4 ${selected ? 'border-indigo-400 ring-2 ring-indigo-100' : 'border-gray-200'}`}>
+    <article className={`panel panel--compact ${selected ? 'prospect-card--selected' : ''}`}>
       <div className="flex items-start gap-3">
         {prospect.avatarUrl ? (
           <img
@@ -345,7 +345,7 @@ function ImportedProspectsList({
                     data-revoke-prospect={record.id}
                     disabled={revokingId === record.id}
                     onClick={() => void revoke(record)}
-                    className="mt-3 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-800 disabled:opacity-50"
+                    className="ui-button ui-button--danger"
                   >
                     {revokingId === record.id ? 'Withdrawing…' : 'Withdraw consent'}
                   </button>
@@ -505,7 +505,7 @@ export function GitHubProspectsPanel({
   return (
     <section
       aria-labelledby="github-prospects-heading"
-      className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm"
+      className="panel panel--padded"
     >
       <div>
         <h2 id="github-prospects-heading" className="text-lg font-semibold">
@@ -555,7 +555,7 @@ export function GitHubProspectsPanel({
           <button
             type="submit"
             disabled={loading}
-            className="w-full inline-flex items-center justify-center gap-2 bg-slate-800 text-white rounded p-2 text-sm font-medium disabled:opacity-50"
+            className="ui-button ui-button--primary w-full"
           >
             <Search className="w-4 h-4" />
             {loading ? 'Searching…' : 'Search GitHub'}
@@ -573,7 +573,7 @@ export function GitHubProspectsPanel({
       <GitHubProspectsConsentNotice />
 
       {selectedProspect && result && (
-        <form onSubmit={(event) => void planImport(event)} data-prospect-consent-form className="mt-6 rounded-xl border border-indigo-200 bg-indigo-50/50 p-4 space-y-3">
+        <form onSubmit={(event) => void planImport(event)} data-prospect-consent-form className="consent-panel panel panel--padded space-y-4">
           <div className="flex items-start gap-2">
             <ShieldCheck className="w-5 h-5 text-indigo-700 mt-0.5" />
             <div>
@@ -618,7 +618,7 @@ export function GitHubProspectsPanel({
             <input type="checkbox" checked={consentAccepted} onChange={(event) => setConsentAccepted(event.target.checked)} className="mt-1" />
             <span>I confirm that explicit consent was captured for this exact scope and evidence reference. A public GitHub profile alone is not consent.</span>
           </label>
-          <button type="submit" disabled={actor.actorType !== 'human_ui'} className="inline-flex items-center gap-2 rounded bg-indigo-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50" data-plan-public-prospect>
+          <button type="submit" disabled={actor.actorType !== 'human_ui'} className="ui-button ui-button--primary" data-plan-public-prospect>
             <ShieldCheck className="w-4 h-4" /> Plan consented import
           </button>
           {actor.actorType !== 'human_ui' && <p role="alert" className="text-xs text-red-700">Only a trusted human may capture consent and request this import plan from the UI.</p>}

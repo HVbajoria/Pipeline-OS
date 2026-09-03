@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Activity, Book, Briefcase, CheckCircle, FileText, HelpCircle, User, Users, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { Activity, Book, Briefcase, CheckCircle, FileText, HelpCircle, Menu, User, Users, X } from 'lucide-react';
 import ActivityTracePanel from './components/ActivityTracePanel';
 import { AppTour } from './components/AppTour';
 import ApprovalCardsPanel from './components/ApprovalCardsPanel';
@@ -41,58 +41,80 @@ function useOperationError(): [string | null, (error: unknown) => void] {
 
 const MAX_VISIBLE_ACTIVITY_ENTRIES = 100;
 
-const LiveActivityFeed = () => {
+interface LiveActivityFeedProps {
+  open: boolean;
+  onClose: () => void;
+}
+
+const LiveActivityFeed = ({ open, onClose }: LiveActivityFeedProps) => {
   const activityLog = useStore((state) => state.activityLog);
   const entries = projectActivityFeed(activityLog).slice(0, MAX_VISIBLE_ACTIVITY_ENTRIES);
 
   return (
-    <aside aria-label="Live Activity Feed" data-tour="activity-feed" className="w-96 bg-gray-50 border-l border-gray-200 h-full overflow-y-auto flex flex-col tour-agent-log">
-      <div className="p-4 border-b border-gray-200 bg-white sticky top-0 font-medium flex items-center gap-2">
-        <Activity className="w-4 h-4 text-blue-600" /> Live Activity Feed
-      </div>
-      <div className="p-4 flex-1 space-y-3">
+    <aside
+      aria-label="Live Activity Feed"
+      data-tour="activity-feed"
+      className={`activity-feed tour-agent-log${open ? ' is-open' : ''}`}
+    >
+      <header className="activity-feed__header">
+        <span className="activity-feed__icon" aria-hidden="true"><Activity className="h-4 w-4" /></span>
+        <span className="activity-feed__header-copy">
+          <span className="activity-feed__title">Live Activity Feed</span>
+          <span className="activity-feed__subtitle">Persisted operations and audit trace</span>
+        </span>
+        <button type="button" className="activity-feed__close" onClick={onClose} aria-label="Close activity feed">
+          <X className="h-4 w-4" />
+        </button>
+      </header>
+      <div className="activity-feed__body">
         {entries.map((entry) => (
           <article
             key={entry.id}
             data-activity-id={entry.id}
             data-trace-group-id={entry.traceGroupId}
-            className="text-sm bg-white border border-gray-200 rounded-lg p-3 shadow-sm"
+            className="activity-entry"
           >
-            <div className="flex justify-between items-start gap-2 mb-1">
-              <span className="font-medium text-gray-800 break-all">{entry.operation}</span>
-              <span className={`text-xs px-2 py-0.5 rounded-full ${entry.error ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+            <div className="activity-entry__topline">
+              <span className="activity-entry__operation">{entry.operation}</span>
+              <span className={`activity-entry__result ${entry.error ? 'activity-entry__result--error' : 'activity-entry__result--success'}`}>
                 {entry.error ? entry.error.code : 'success'}
               </span>
             </div>
             {(entry.phase || entry.approvalId || entry.replayed || entry.originalActivityId || entry.stale || entry.correlationId || entry.traceId || (entry.redactions && entry.redactions.length > 0)) && (
-              <div data-activity-markers className="flex flex-wrap gap-1 mb-2 text-xs">
-                {entry.phase && <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-700">phase: {entry.phase}</span>}
-                {entry.approvalId && <span className="rounded bg-indigo-100 px-2 py-0.5 text-indigo-800">approval: {entry.approvalId}</span>}
-                {entry.replayed && <span className="rounded bg-purple-100 px-2 py-0.5 text-purple-800">replayed</span>}
-                {entry.originalActivityId && <span className="rounded bg-purple-50 px-2 py-0.5 text-purple-700">original: {entry.originalActivityId}</span>}
-                {entry.stale && <span className="rounded bg-orange-100 px-2 py-0.5 text-orange-800">stale</span>}
-                {entry.correlationId && <span className="rounded bg-cyan-100 px-2 py-0.5 text-cyan-800">correlation: {entry.correlationId}</span>}
-                {entry.traceId && <span className="rounded bg-blue-100 px-2 py-0.5 text-blue-800">trace: {entry.traceId}</span>}
-                {entry.redactions && entry.redactions.length > 0 && <span className="rounded bg-amber-100 px-2 py-0.5 text-amber-800">redacted: {entry.redactions.length}</span>}
+              <div data-activity-markers className="activity-markers">
+                {entry.phase && <span className="activity-marker">phase: {entry.phase}</span>}
+                {entry.approvalId && <span className="activity-marker activity-marker--accent">approval: {entry.approvalId}</span>}
+                {entry.replayed && <span className="activity-marker activity-marker--accent">replayed</span>}
+                {entry.originalActivityId && <span className="activity-marker activity-marker--accent">original: {entry.originalActivityId}</span>}
+                {entry.stale && <span className="activity-marker activity-marker--warning">stale</span>}
+                {entry.correlationId && <span className="activity-marker activity-marker--info">correlation: {entry.correlationId}</span>}
+                {entry.traceId && <span className="activity-marker activity-marker--info">trace: {entry.traceId}</span>}
+                {entry.redactions && entry.redactions.length > 0 && <span className="activity-marker activity-marker--warning">redacted: {entry.redactions.length}</span>}
               </div>
             )}
-            <dl className="text-xs text-gray-500 space-y-1">
-              <div><dt className="inline font-semibold">actor</dt><dd className="inline"> {entry.actorType} · {entry.actorId}</dd></div>
-              <div><dt className="inline font-semibold">timestamp</dt><dd className="inline"> {entry.timestamp}</dd></div>
-              {entry.spanId && <div><dt className="inline font-semibold">root span</dt><dd className="inline"> {entry.spanId}</dd></div>}
+            <dl className="activity-entry__meta">
+              <div><dt>actor</dt><dd className="inline"> {entry.actorType} · {entry.actorId}</dd></div>
+              <div><dt>timestamp</dt><dd className="inline"> {entry.timestamp}</dd></div>
+              {entry.spanId && <div><dt>root span</dt><dd className="inline"> {entry.spanId}</dd></div>}
             </dl>
-            <div className="mt-2 space-y-1 text-xs font-mono">
-              <div><strong>input</strong><pre className="mt-1 bg-gray-50 p-2 rounded overflow-x-auto">{json(entry.input)}</pre></div>
-              <div><strong>{entry.error ? 'error' : 'output'}</strong><pre className="mt-1 bg-gray-50 p-2 rounded overflow-x-auto">{json(entry.error ?? entry.output)}</pre></div>
+            <div className="activity-entry__payloads">
+              <details className="activity-entry__payload">
+                <summary>View input</summary>
+                <pre>{json(entry.input)}</pre>
+              </details>
+              <details className="activity-entry__payload">
+                <summary>{entry.error ? 'View error' : 'View output'}</summary>
+                <pre>{json(entry.error ?? entry.output)}</pre>
+              </details>
             </div>
             <ActivityTracePanel entry={entry} />
           </article>
         ))}
         {entries.length === 0 && (
-          <div className="text-sm text-gray-400 text-center py-8">No activity yet.</div>
+          <div className="activity-feed__empty">No activity yet.</div>
         )}
         {activityLog.length > MAX_VISIBLE_ACTIVITY_ENTRIES && (
-          <div className="text-xs text-gray-400 text-center py-2">Showing the latest {MAX_VISIBLE_ACTIVITY_ENTRIES} activities.</div>
+          <div className="activity-feed__empty">Showing the latest {MAX_VISIBLE_ACTIVITY_ENTRIES} activities.</div>
         )}
       </div>
     </aside>
@@ -101,18 +123,24 @@ const LiveActivityFeed = () => {
 
 interface NavigationProps {
   onStartTour: () => void;
+  mobileOpen: boolean;
+  onClose: () => void;
 }
 
-const Navigation = ({ onStartTour }: NavigationProps) => {
+const Navigation = ({ onStartTour, mobileOpen, onClose }: NavigationProps) => {
   const { currentRole, setRole, resetState } = useStore();
   const [resetError, setResetError] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
 
   const reset = async () => {
     try {
       setResetError(null);
+      setResetting(true);
       await resetState();
     } catch (error) {
       setResetError(errorMessage(error));
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -124,32 +152,43 @@ const Navigation = ({ onStartTour }: NavigationProps) => {
   ] as const;
 
   return (
-    <nav aria-label="Primary navigation" className="bg-slate-900 text-white w-64 flex flex-col h-full">
-      <div data-tour="brand" className="p-4 flex items-center gap-2 border-b border-slate-800">
-        <Briefcase className="w-6 h-6 text-blue-400" />
-        <span className="font-bold text-lg tracking-tight">PipelineOS</span>
-      </div>
-      <div data-tour="role-switcher" className="flex-1 py-6 px-3 space-y-1 tour-role-switcher">
-        <div className="px-3 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">View As</div>
-        {roles.map(([role, Icon, label]) => (
-          <button
-            key={role}
-            onClick={() => setRole(role)}
-            data-tour={role === 'documentation' ? 'documentation-nav' : undefined}
-            className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${currentRole === role ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
-          >
-            <Icon className="w-4 h-4" /> {label}
-          </button>
-        ))}
-      </div>
-      <div className="p-4 border-t border-slate-800 space-y-2">
-        <button onClick={onStartTour} data-tour="start-tour" className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400">
-          <HelpCircle className="w-4 h-4" /> Start Tour
+    <nav aria-label="Primary navigation" className={`app-nav${mobileOpen ? ' is-open' : ''}`}>
+      <div data-tour="brand" className="app-nav__brand">
+        <span className="app-nav__brand-mark" aria-hidden="true"><Briefcase className="h-4 w-4" /></span>
+        <span className="app-nav__brand-copy">
+          <span className="app-nav__brand-name">PipelineOS</span>
+          <span className="app-nav__brand-caption">Recruiting operations</span>
+        </span>
+        <button type="button" className="app-nav__close" onClick={onClose} aria-label="Close navigation">
+          <X className="h-4 w-4" />
         </button>
-        <button onClick={reset} data-tour="reset-demo" className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400">
-          Reset DB (Demo)
+      </div>
+      <div data-tour="role-switcher" className="app-nav__workspace tour-role-switcher">
+        <p className="app-nav__eyebrow">Workspace</p>
+        <div className="app-nav__items">
+          {roles.map(([role, Icon, label]) => (
+            <button
+              type="button"
+              key={role}
+              onClick={() => { setRole(role); onClose(); }}
+              data-tour={role === 'documentation' ? 'documentation-nav' : undefined}
+              aria-current={currentRole === role ? 'page' : undefined}
+              className="app-nav__item"
+            >
+              <Icon className="h-4 w-4" /> <span>{label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="app-nav__footer">
+        <p className="app-nav__footer-label">Demo controls</p>
+        <button type="button" onClick={onStartTour} data-tour="start-tour" className="app-nav__utility">
+          <HelpCircle className="h-4 w-4" /> Start Tour
         </button>
-        {resetError && <p className="text-xs text-red-300">{resetError}</p>}
+        <button type="button" onClick={() => void reset()} disabled={resetting} data-tour="reset-demo" className="app-nav__utility">
+          <Activity className="h-4 w-4" /> {resetting ? 'Resetting demo…' : 'Reset demo state'}
+        </button>
+        {resetError && <p className="app-nav__error" role="alert">{resetError}</p>}
       </div>
     </nav>
   );
@@ -176,26 +215,31 @@ const DocumentationView = () => {
   }, []);
 
   return (
-    <div data-tour="role-view" className="p-8 max-w-5xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">WebMCP Tools Documentation</h1>
-        <p className="text-gray-500">
-          The documentation is rendered from the same {OPERATION_NAMES.length} descriptors registered with WebMCP.
-          Each actor-scoped manifest entry exposes safe execution mode, approval policy, resource-scope summary, and redacted-field metadata; capability visibility is informational and denied calls still return the canonical structured service error.
-          HTTP, OperationClient, UI, and WebMCP calls share structured errors plus correlation/trace/replay headers, while state and activity remain actor-scoped and SSE carries revision hints only.
-        </p>
+    <div data-tour="role-view" className="page-shell">
+      <header className="page-header">
+        <div className="page-header__copy">
+          <p className="page-header__eyebrow">Platform reference</p>
+          <h1 className="page-title">WebMCP tools documentation</h1>
+          <p className="page-description">
+            The documentation is rendered from the same {OPERATION_NAMES.length} descriptors registered with WebMCP. Each actor-scoped manifest entry exposes safe execution mode, approval policy, resource-scope summary, and redacted-field metadata; capability visibility is informational and denied calls still return the canonical structured service error.
+          </p>
+        </div>
+        <div className="page-header__meta">
+          <span className="status-pill status-pill--info">{OPERATION_NAMES.length} registered operations</span>
+          <span className="status-pill status-pill--neutral">Read-only reference</span>
+        </div>
+      </header>
         {manifest && (
           <p data-capability-manifest className="mt-2 text-xs text-gray-500">
             Manifest {manifest.manifestVersion} · policy {manifest.policyVersion} · {manifest.capabilities.filter((entry) => entry.allowed).length}/{manifest.capabilities.length} allowed for {manifest.actor.actorId}
           </p>
         )}
         {manifestError && <p data-capability-manifest-error className="mt-2 text-xs text-amber-700">Capability manifest unavailable: {manifestError}</p>}
-      </div>
       <div data-tour="documentation-registry" className="space-y-6">
         {descriptors.map((tool) => {
           const capability = manifest?.capabilities.find((entry) => entry.name === tool.name);
           return (
-            <article key={tool.name} className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+            <article key={tool.name} className="panel panel--padded">
               <div className="flex items-center justify-between gap-3 mb-2">
                 <h2 className="text-lg font-bold text-gray-900 font-mono text-blue-600">{tool.name}</h2>
                 <span className="text-xs rounded-full px-2 py-1 bg-slate-100 text-slate-600">{tool.readOnly ? 'read-only' : 'mutation'}</span>
@@ -243,6 +287,7 @@ const FeedbackSummaryPanel = ({ summary }: { summary: GetPanelFeedbackSummaryOut
 const RecruiterView = () => {
   const { jobs, applications, candidates, interviews, offers, onboardingTasks, backgroundChecks, benefitsEnrollments, panels, catalogs } = useStore();
   const [profile, setProfile] = useState<GetCandidateProfileOutput | null>(null);
+  const profileCloseButtonRef = useRef<HTMLButtonElement>(null);
   const [feedbackSummaries, setFeedbackSummaries] = useState<Record<string, GetPanelFeedbackSummaryOutput>>({});
   const [commonSlotsByApplication, setCommonSlotsByApplication] = useState<Record<string, CheckInterviewerAvailabilityOutput['commonFreeSlots']>>({});
   const [proposedSlotsByApplication, setProposedSlotsByApplication] = useState<Record<string, ProposeInterviewSlotsOutput['proposedSlots']>>({});
@@ -251,6 +296,20 @@ const RecruiterView = () => {
   const [onboardingStatus, setOnboardingStatus] = useState<Record<string, GetOnboardingStatusOutput>>({});
   const [error, setError] = useOperationError();
   const actor = actorContextForRole('recruiter');
+
+  useEffect(() => {
+    if (!profile) return undefined;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    profileCloseButtonRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setProfile(null);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      previousFocus?.focus();
+    };
+  }, [profile]);
 
   const run = async (operation: () => Promise<unknown>) => {
     try {
@@ -354,26 +413,33 @@ const RecruiterView = () => {
   const columns = useMemo(() => projectKanban(applications), [applications]);
 
   return (
-    <div data-tour="role-view" className="p-8 max-w-7xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">Recruiter Dashboard</h1>
-        <p className="text-gray-500">All cards, offers, interviews, and activity are projections of persisted Shared_State.</p>
-      </div>
-      {error && <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>}
+    <div data-tour="role-view" className="page-shell page-shell--wide">
+      <header className="page-header">
+        <div className="page-header__copy">
+          <p className="page-header__eyebrow">Recruiting operations</p>
+          <h1 className="page-title">Recruiter dashboard</h1>
+          <p className="page-description">A live command center for requisitions, candidate decisions, interviews, offers, and onboarding. Every card is projected from the persisted shared state.</p>
+        </div>
+        <div className="page-header__meta">
+          <span className="status-pill status-pill--success"><span aria-hidden="true">●</span> Shared state connected</span>
+          <span className="status-pill status-pill--neutral">{applications.length} active applications</span>
+        </div>
+      </header>
+      {error && <div role="alert" className="callout callout--danger mb-5">{error}</div>}
       <LivePublicJobsPanel />
       <ApprovalCardsPanel actor={actor} role="recruiter" />
-      <div className="grid grid-cols-1 gap-8 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2 page-section">
         <WorkflowStatusPanel actor={actor} role="recruiter" />
         <CandidateComparisonPanel actor={actor} role="recruiter" />
       </div>
       <WorkflowCoordinatorPanel actor={actor} role="recruiter" />
 
       {profile && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto shadow-2xl p-6">
+        <div role="dialog" aria-modal="true" aria-labelledby="recruiter-profile-title" className="modal-backdrop fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="modal-panel bg-white rounded-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto shadow-2xl p-6">
             <div className="flex justify-between items-start mb-5">
-              <div><h2 className="text-xl font-bold">{profile.name}</h2><p className="text-sm text-gray-500">{profile.email}</p></div>
-              <button onClick={() => setProfile(null)} aria-label="Close profile"><X className="w-5 h-5" /></button>
+              <div><h2 id="recruiter-profile-title" className="text-xl font-bold">{profile.name}</h2><p className="text-sm text-gray-500">{profile.email}</p></div>
+              <button ref={profileCloseButtonRef} type="button" className="icon-button" onClick={() => setProfile(null)} aria-label="Close profile"><X className="w-5 h-5" /></button>
             </div>
             <p className="text-sm mb-4">Skills: {profile.skills.join(', ')}</p>
             <pre className="text-sm bg-gray-50 rounded p-3 whitespace-pre-wrap">{profile.resumeText}</pre>
@@ -383,28 +449,28 @@ const RecruiterView = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <form onSubmit={handleCreateReq} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-3">
-          <h2 className="text-lg font-semibold border-b pb-2">New requisition</h2>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 page-section">
+        <form onSubmit={handleCreateReq} className="panel panel--padded space-y-4">
+          <h2 className="panel__title">New requisition</h2>
           <input name="title" placeholder="Job title" required className="w-full border rounded p-2 text-sm" />
           <input name="department" placeholder="Department" required className="w-full border rounded p-2 text-sm" />
           <input name="requirements" placeholder="Requirements (comma separated)" required className="w-full border rounded p-2 text-sm" />
           <div className="flex gap-2"><input name="min" type="number" placeholder="Min" required className="w-full border rounded p-2 text-sm" /><input name="max" type="number" placeholder="Max" required className="w-full border rounded p-2 text-sm" /><input name="currency" defaultValue="USD" required className="w-24 border rounded p-2 text-sm" /></div>
-          <button className="w-full bg-blue-600 text-white rounded p-2 text-sm font-medium">Create requisition</button>
+          <button type="submit" className="ui-button ui-button--primary w-full">Create requisition</button>
         </form>
         <GitHubProspectsPanel actor={actor} role="recruiter" />
       </div>
 
-      <section>
-        <h2 className="text-lg font-semibold mb-4">Requisitions</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{jobs.map((job) => <div key={job.id} className="bg-white p-5 rounded-xl border border-gray-200"><div className="flex justify-between"><h3 className="font-semibold">{job.title}</h3><span className="text-xs text-green-700">{job.status}</span></div><p className="text-sm text-gray-500">{job.department} · {job.compBand.min.toLocaleString()}–{job.compBand.max.toLocaleString()} {job.compBand.currency}</p><p className="text-sm text-gray-600 mt-2">{applications.filter((application) => application.jobId === job.id).length} applications</p></div>)}</div>
+      <section className="page-section">
+        <div className="section-heading"><div><h2 className="section-heading__title">Requisitions</h2><p className="section-heading__description">Internal roles and their current application volume.</p></div></div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{jobs.map((job) => <div key={job.id} className="panel panel--padded"><div className="flex justify-between"><h3 className="font-semibold">{job.title}</h3><span className="text-xs text-green-700">{job.status}</span></div><p className="text-sm text-gray-500">{job.department} · {job.compBand.min.toLocaleString()}–{job.compBand.max.toLocaleString()} {job.compBand.currency}</p><p className="text-sm text-gray-600 mt-2">{applications.filter((application) => application.jobId === job.id).length} applications</p></div>)}</div>
       </section>
 
-      <section>
-        <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-semibold">Pipeline Kanban</h2><span className="text-xs text-gray-500">Columns follow persisted application status</span></div>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      <section className="page-section">
+        <div className="section-heading"><div><h2 className="section-heading__title">Pipeline Kanban</h2><p className="section-heading__description">Columns follow persisted application status.</p></div></div>
+        <div className="kanban-grid">
           {columns.map((column) => (
-            <div key={column.status} data-status={column.status} className="bg-gray-50 border border-gray-200 rounded-xl p-3 min-h-36">
+            <div key={column.status} data-status={column.status} className="kanban-column">
               <h3 className="capitalize font-semibold text-sm mb-3">{column.label} <span className="text-gray-400">({column.applications.length})</span></h3>
               <div className="space-y-3">
                 {column.applications.map((application) => {
@@ -429,7 +495,7 @@ const RecruiterView = () => {
                   const defaultOfferAmount = job ? String(Math.round((job.compBand.min + job.compBand.max) / 2)) : '';
                   const offerAmount = offerAmounts[application.id] ?? defaultOfferAmount;
                   return (
-                    <article key={application.id} className="bg-white rounded-lg border p-3 shadow-sm text-sm">
+                    <article key={application.id} className="kanban-card">
                       <div className="flex justify-between gap-2"><strong>{candidate?.name ?? application.candidateId}</strong><span className="text-xs text-gray-500">{application.status}</span></div>
                       {application.screeningScore !== null && <div className="text-xs text-gray-600 mt-1"><p>Screening: {application.screeningScore}%</p>{application.screeningRationale && <p className="text-gray-500">{application.screeningRationale}</p>}</div>}
                       {offer && <div className="text-xs mt-1"><p>Offer: {offer.status} · {offer.compAmount.toLocaleString()} {offer.currency}</p>{offer.compensationWarning && <p className="text-amber-700">Compensation warning: {offer.compensationWarning}</p>}</div>}
@@ -438,15 +504,15 @@ const RecruiterView = () => {
                       {feedbackSummary && <FeedbackSummaryPanel summary={feedbackSummary} />}
                       {acceptedOffer && <div className="mt-2 rounded bg-orange-50 border border-orange-100 p-2 text-xs"><p>Background check: <strong>{background?.status ?? 'not started'}</strong> · Benefits: <strong>{status ? (status.benefitsEnrolled ? 'enrolled' : 'not enrolled') : (benefits ? 'enrolled' : 'not enrolled')}</strong></p><p>Tasks: <strong>{status ? `${status.taskCompletion.done}/${status.taskCompletion.total} complete (${status.completionPercentage}%)` : `${tasks.filter((task) => task.status === 'complete').length}/${tasks.length} complete`}</strong></p>{tasks.length > 0 && <ul className="mt-1 space-y-1">{tasks.map((task) => <li key={task.id}>{task.taskName} · {task.status} · due {new Date(task.dueDate).toLocaleDateString()}</li>)}</ul>}</div>}
                       <div className="flex flex-wrap gap-1 mt-3">
-                        {application.status === 'applied' && <button onClick={() => void handleScreen(application.id)} className="text-blue-700 bg-blue-50 px-2 py-1 rounded text-xs">Screen</button>}
-                        {application.status === 'screened' && <button onClick={() => void handlePropose(application)} className="text-indigo-700 bg-indigo-50 px-2 py-1 rounded text-xs">Check & propose</button>}
-                        {application.status === 'interviewing' && job && <div className="flex items-center gap-1"><label className="text-xs text-gray-600">Offer ({job.compBand.min.toLocaleString()}–{job.compBand.max.toLocaleString()} {job.compBand.currency})<input aria-label={`Offer amount for ${candidate?.name ?? application.candidateId}`} value={offerAmount} onChange={(event) => setOfferAmounts((previous) => ({ ...previous, [application.id]: event.target.value }))} type="number" min="0" required className="w-24 border rounded p-1 ml-1" /></label><button onClick={() => void handleOffer(application.id, offerAmount)} className="text-green-700 bg-green-50 px-2 py-1 rounded text-xs">Generate offer</button></div>}
-                        {offer?.status === 'draft' && <button onClick={() => void handleSendOffer(offer.id)} className="text-purple-700 bg-purple-50 px-2 py-1 rounded text-xs">Send offer</button>}
-                        {appInterviews.length > 0 && <button onClick={() => void loadFeedbackSummary(application.id)} className="text-indigo-700 bg-indigo-50 px-2 py-1 rounded text-xs">Load feedback</button>}
-                        {acceptedOffer && !background && <button onClick={() => void handleBackgroundCheck(acceptedOffer.id)} className="text-purple-700 bg-purple-50 px-2 py-1 rounded text-xs">Background check</button>}
-                        {acceptedOffer && tasks.length === 0 && <button onClick={() => void handleChecklist(acceptedOffer.id)} className="text-orange-700 bg-orange-50 px-2 py-1 rounded text-xs">Checklist</button>}
-                        {acceptedOffer && <button onClick={() => void handleOnboardingStatus(acceptedOffer.id)} className="text-orange-700 bg-orange-50 px-2 py-1 rounded text-xs">Refresh status</button>}
-                        <button onClick={() => candidate && void handleProfile(candidate.id)} className="text-gray-700 bg-gray-100 px-2 py-1 rounded text-xs">Profile</button>
+                        {application.status === 'applied' && <button onClick={() => void handleScreen(application.id)} className="ui-button ui-button--soft">Screen</button>}
+                        {application.status === 'screened' && <button onClick={() => void handlePropose(application)} className="ui-button ui-button--soft">Check & propose</button>}
+                        {application.status === 'interviewing' && job && <div className="flex items-center gap-1"><label className="text-xs text-gray-600">Offer ({job.compBand.min.toLocaleString()}–{job.compBand.max.toLocaleString()} {job.compBand.currency})<input aria-label={`Offer amount for ${candidate?.name ?? application.candidateId}`} value={offerAmount} onChange={(event) => setOfferAmounts((previous) => ({ ...previous, [application.id]: event.target.value }))} type="number" min="0" required className="w-24 border rounded p-1 ml-1" /></label><button onClick={() => void handleOffer(application.id, offerAmount)} className="ui-button ui-button--success">Generate offer</button></div>}
+                        {offer?.status === 'draft' && <button onClick={() => void handleSendOffer(offer.id)} className="ui-button ui-button--primary">Send offer</button>}
+                        {appInterviews.length > 0 && <button onClick={() => void loadFeedbackSummary(application.id)} className="ui-button ui-button--soft">Load feedback</button>}
+                        {acceptedOffer && !background && <button onClick={() => void handleBackgroundCheck(acceptedOffer.id)} className="ui-button ui-button--primary">Background check</button>}
+                        {acceptedOffer && tasks.length === 0 && <button onClick={() => void handleChecklist(acceptedOffer.id)} className="ui-button ui-button--warning">Checklist</button>}
+                        {acceptedOffer && <button onClick={() => void handleOnboardingStatus(acceptedOffer.id)} className="ui-button ui-button--warning">Refresh status</button>}
+                        <button onClick={() => candidate && void handleProfile(candidate.id)} className="ui-button ui-button--secondary">Profile</button>
                       </div>
                       {schedulingAppId === application.id && <div className="mt-3 border-t pt-2 space-y-2"><div><p className="text-xs text-gray-500 mb-1">Common free slots ({commonSlots.length})</p>{commonSlots.length > 0 ? <p className="text-xs text-gray-600">{commonSlots.map((slot) => new Date(slot).toLocaleString()).join(' · ')}</p> : <p className="text-xs text-gray-400">No common slots returned.</p>}</div><div><p className="text-xs text-gray-500 mb-1">Proposed slots</p>{proposedSlots.length > 0 ? <div className="flex flex-wrap gap-1">{proposedSlots.map((proposed) => <button key={proposed.interviewId} onClick={() => void handleBook(application.id, proposed.slot)} className="text-xs border border-indigo-300 text-indigo-700 rounded px-2 py-1">{new Date(proposed.slot).toLocaleString()}</button>)}</div> : <p className="text-xs text-gray-400">No proposed slots.</p>}</div></div>}
                     </article>
@@ -586,23 +652,26 @@ const CandidateView = () => {
     });
 
   return (
-    <div data-tour="role-view" className="p-8 max-w-5xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">
-          Welcome, {candidate?.name}
-        </h1>
-        <p className="text-gray-500">
-          Applications, interviews, offers, and onboarding use the persisted shared snapshot.
-        </p>
-      </div>
+    <div data-tour="role-view" className="page-shell">
+      <header className="page-header">
+        <div className="page-header__copy">
+          <p className="page-header__eyebrow">Candidate workspace</p>
+          <h1 className="page-title">Welcome, {candidate?.name}</h1>
+          <p className="page-description">Track applications, choose interview times, review offers, and complete onboarding from one synchronized workspace.</p>
+        </div>
+        <div className="page-header__meta">
+          <span className="status-pill status-pill--info">{myApplications.length} application{myApplications.length === 1 ? '' : 's'}</span>
+          <span className="status-pill status-pill--neutral">Private candidate view</span>
+        </div>
+      </header>
       {error && (
-        <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
+        <div role="alert" className="callout callout--danger mb-5">
           {error}
         </div>
       )}
 
-      <section aria-label="Your applications" data-candidate-applications>
-        <h2 className="text-lg font-semibold mb-3">Your applications</h2>
+      <section aria-label="Your applications" data-candidate-applications className="page-section">
+        <h2 className="section-heading__title">Your applications</h2>
         {myApplications.length === 0 ? (
           <p className="text-gray-500">No applications submitted yet.</p>
         ) : (
@@ -613,7 +682,7 @@ const CandidateView = () => {
                 <article
                   key={application.id}
                   data-application-id={application.id}
-                  className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm"
+                  className="panel panel--padded"
                 >
                   <div className="flex justify-between items-start gap-3">
                     <div>
@@ -626,7 +695,7 @@ const CandidateView = () => {
                     </div>
                     <span
                       data-application-status={application.status}
-                      className="text-xs rounded-full px-2 py-1 bg-blue-50 text-blue-700 capitalize"
+                      className="status-pill status-pill--primary capitalize"
                     >
                       {application.status.replaceAll('_', ' ')}
                     </span>
@@ -647,8 +716,8 @@ const CandidateView = () => {
         )}
       </section>
 
-      <section aria-label="Interview schedule" data-candidate-interviews>
-        <h2 className="text-lg font-semibold mb-3">Interview schedule</h2>
+      <section aria-label="Interview schedule" data-candidate-interviews className="page-section">
+        <h2 className="section-heading__title">Interview schedule</h2>
         {myApplications.every(
           (application) =>
             !interviews.some((interview) => interview.applicationId === application.id)
@@ -671,7 +740,7 @@ const CandidateView = () => {
                 <article
                   key={application.id}
                   data-application-id={application.id}
-                  className="bg-indigo-50 border border-indigo-100 rounded-xl p-4"
+                  className="panel panel--padded candidate-interview-card"
                 >
                   <h3 className="font-medium text-indigo-900">
                     {job?.title ?? application.jobId}
@@ -700,7 +769,7 @@ const CandidateView = () => {
                             key={interview.id}
                             data-interview-status="proposed"
                             onClick={() => handleBook(application.id, interview.slot)}
-                            className="px-3 py-2 bg-white border border-indigo-200 text-indigo-700 rounded-lg text-sm"
+                            className="ui-button ui-button--soft"
                           >
                             {new Date(interview.slot).toLocaleString()}
                           </button>
@@ -715,8 +784,8 @@ const CandidateView = () => {
         )}
       </section>
 
-      <section aria-label="Your offers" data-candidate-offers>
-        <h2 className="text-lg font-semibold mb-3">Your offers</h2>
+      <section aria-label="Your offers" data-candidate-offers className="page-section">
+        <h2 className="section-heading__title">Your offers</h2>
         <div className="space-y-4">
           {myOffers.map((offer) => {
             const application = myApplications.find(
@@ -745,7 +814,7 @@ const CandidateView = () => {
               <article
                 key={offer.id}
                 data-offer-id={offer.id}
-                className="bg-green-50 border border-green-200 p-5 rounded-xl shadow-sm"
+                className="panel panel--padded candidate-offer-card"
               >
                 <div
                   role="status"
@@ -797,13 +866,13 @@ const CandidateView = () => {
                   <div className="flex flex-wrap items-center gap-2 mt-4">
                     <button
                       onClick={() => handleResponse(offer.id, 'accept')}
-                      className="px-3 py-2 bg-green-600 text-white rounded"
+                      className="ui-button ui-button--success"
                     >
                       Accept
                     </button>
                     <button
                       onClick={() => handleResponse(offer.id, 'decline')}
-                      className="px-3 py-2 bg-white border rounded"
+                      className="ui-button ui-button--secondary"
                     >
                       Decline
                     </button>
@@ -826,7 +895,7 @@ const CandidateView = () => {
                     </label>
                     <button
                       onClick={() => handleResponse(offer.id, 'counter')}
-                      className="px-3 py-2 bg-white border rounded"
+                      className="ui-button ui-button--secondary"
                     >
                       Counter
                     </button>
@@ -849,7 +918,7 @@ const CandidateView = () => {
                       <p className="text-xs text-gray-600">
                         Choose from the persisted medical, dental, and vision plan catalog.
                       </p>
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="inline-controls flex flex-wrap items-center gap-2">
                         <select
                           aria-label="Medical plan"
                           value={selected.medical}
@@ -938,7 +1007,7 @@ const CandidateView = () => {
                       ) : (
                         <p className="text-xs text-gray-500">No onboarding checklist has been generated yet.</p>
                       )}
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="inline-controls flex flex-wrap items-center gap-2">
                         <button
                           onClick={() => void handleOnboardingStatus(offer.id)}
                           className="text-orange-700 underline"
@@ -961,13 +1030,13 @@ const CandidateView = () => {
         </div>
       </section>
 
-      <section aria-label="Open roles">
-        <h2 className="text-lg font-semibold mb-3">Open roles</h2>
+      <section aria-label="Open roles" className="page-section">
+        <h2 className="section-heading__title">Open roles</h2>
         <div className="space-y-4">
           {jobs.filter((job) => job.status === 'open').map((job) => {
             const application = myApplications.find((item) => item.jobId === job.id);
             return (
-              <article key={job.id} className="bg-white p-5 rounded-xl border border-gray-200">
+              <article key={job.id} className="panel panel--padded">
                 <div className="flex justify-between items-start gap-3">
                   <div>
                     <h3 className="font-semibold text-lg">{job.title}</h3>
@@ -982,20 +1051,20 @@ const CandidateView = () => {
                   ) : (
                     <button
                       onClick={() => handleApply(job.id)}
-                      className="px-3 py-2 bg-blue-600 text-white rounded"
+                      className="ui-button ui-button--primary"
                     >
                       Apply
                     </button>
                   )}
                 </div>
-                <form onSubmit={(event) => void handleFaq(event, job.id)} className="flex gap-2 mt-4">
+                <form onSubmit={(event) => void handleFaq(event, job.id)} className="faq-form flex gap-2 mt-4">
                   <input
                     name="question"
                     required
                     placeholder="Ask about requirements or compensation"
                     className="flex-1 border rounded p-2 text-sm"
                   />
-                  <button className="px-3 py-2 bg-slate-200 rounded text-sm">Ask</button>
+                  <button type="submit" className="ui-button ui-button--secondary">Ask</button>
                 </form>
                 {faqAnswers[job.id] && (
                   <div className="mt-2 text-sm p-2 rounded bg-blue-50">
@@ -1026,9 +1095,25 @@ const HiringManagerView = () => {
   const [summaries, setSummaries] = useState<Record<string, GetPanelFeedbackSummaryOutput>>({});
   const [candidateProfiles, setCandidateProfiles] = useState<Record<string, GetCandidateProfileOutput>>({});
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
+  const profileCloseButtonRef = useRef<HTMLButtonElement>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [error, setErrorState] = useState<string | null>(null);
   const actor = actorContextForRole('hiring-manager');
+
+  useEffect(() => {
+    if (!selectedCandidateId) return undefined;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    profileCloseButtonRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedCandidateId(null);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      previousFocus?.focus();
+    };
+  }, [selectedCandidateId]);
+
   const recommendations = ['strong_yes', 'yes', 'no', 'strong_no'] as const;
   const feedbackInterviews = interviews.filter(
     (interview) => interview.status === 'booked' || interview.status === 'completed'
@@ -1149,19 +1234,24 @@ const HiringManagerView = () => {
     : undefined;
 
   return (
-    <div data-tour="role-view" className="p-8 max-w-5xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold">Hiring Manager Portal</h1>
-        <p className="text-gray-500">
-          Prepare from the persisted role template and submit validated scorecards.
-        </p>
-      </div>
+    <div data-tour="role-view" className="page-shell">
+      <header className="page-header">
+        <div className="page-header__copy">
+          <p className="page-header__eyebrow">Hiring manager workspace</p>
+          <h1 className="page-title">Interview room</h1>
+          <p className="page-description">Prepare from the persisted role template, review canonical candidate context, and submit validated scorecards for booked interviews.</p>
+        </div>
+        <div className="page-header__meta">
+          <span className="status-pill status-pill--info">{feedbackInterviews.length} interview{feedbackInterviews.length === 1 ? '' : 's'} ready</span>
+          <span className="status-pill status-pill--neutral">Validated scorecards</span>
+        </div>
+      </header>
       {error && (
-        <div role="alert" className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
+        <div role="alert" className="callout callout--danger mb-5">
           {error}
         </div>
       )}
-      <div className="grid grid-cols-1 gap-8 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2 page-section">
         <WorkflowStatusPanel actor={actor} role="hiring-manager" />
         <CandidateComparisonPanel actor={actor} role="hiring-manager" />
       </div>
@@ -1171,16 +1261,18 @@ const HiringManagerView = () => {
           role="dialog"
           aria-modal="true"
           aria-label={`Candidate profile for ${selectedProfile.name}`}
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          className="modal-backdrop fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
         >
-          <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto shadow-2xl p-6">
+          <div className="modal-panel bg-white rounded-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto shadow-2xl p-6">
             <div className="flex justify-between items-start mb-5">
               <div>
                 <h2 className="text-xl font-bold">{selectedProfile.name}</h2>
                 <p className="text-sm text-gray-500">{selectedProfile.email}</p>
               </div>
               <button
+                ref={profileCloseButtonRef}
                 type="button"
+                className="icon-button"
                 onClick={() => setSelectedCandidateId(null)}
                 aria-label="Close candidate profile"
               >
@@ -1213,7 +1305,7 @@ const HiringManagerView = () => {
         </div>
       )}
 
-      <section aria-label="Interview feedback">
+      <section aria-label="Interview feedback" className="page-section">
         <div className="flex items-center justify-between gap-3 mb-3">
           <h2 className="text-lg font-semibold">Interview feedback</h2>
           <span className="text-xs text-gray-500">
@@ -1246,7 +1338,7 @@ const HiringManagerView = () => {
               <article
                 key={interview.id}
                 data-interview-id={interview.id}
-                className="bg-white border rounded-xl p-5 shadow-sm"
+                className="panel panel--padded"
               >
                 <div className="flex justify-between items-start gap-3">
                   <div>
@@ -1458,18 +1550,77 @@ export interface AppProps {
 export default function App({ bootError = null }: AppProps = {}) {
   const currentRole = useStore((state) => state.currentRole);
   const [tourOpen, setTourOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const roleLabel = currentRole === 'hiring-manager'
+    ? 'Hiring manager'
+    : currentRole.charAt(0).toUpperCase() + currentRole.slice(1);
+
+  useEffect(() => {
+    if (!mobileNavOpen && !activityOpen) return undefined;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setMobileNavOpen(false);
+      setActivityOpen(false);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [activityOpen, mobileNavOpen]);
 
   return (
-    <div className="flex h-screen w-full bg-gray-50 overflow-hidden font-sans">
-      <Navigation onStartTour={() => setTourOpen(true)} />
-      <main data-tour="main-workflow" className="flex-1 h-full overflow-y-auto tour-main-content">
-        {bootError && <div className="m-6 p-3 bg-red-50 border border-red-200 text-red-700 rounded">{bootError}</div>}
+    <div className="app-shell">
+      <Navigation
+        mobileOpen={mobileNavOpen}
+        onClose={() => setMobileNavOpen(false)}
+        onStartTour={() => { setTourOpen(true); setMobileNavOpen(false); }}
+      />
+      {mobileNavOpen && (
+        <button
+          type="button"
+          className="mobile-shell-backdrop"
+          aria-label="Close navigation"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
+      <main data-tour="main-workflow" className="app-main tour-main-content">
+        <div className="mobile-shell-toolbar">
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Open navigation"
+            aria-expanded={mobileNavOpen}
+            onClick={() => { setActivityOpen(false); setMobileNavOpen(true); }}
+          >
+            <Menu className="h-4 w-4" />
+          </button>
+          <span className="mobile-shell-toolbar__title">PipelineOS <span className="text-slate-400">/</span> {roleLabel}</span>
+          <div className="mobile-shell-toolbar__actions">
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Open activity feed"
+              aria-expanded={activityOpen}
+              onClick={() => { setMobileNavOpen(false); setActivityOpen(true); }}
+            >
+              <Activity className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+        {bootError && <div className="callout callout--danger m-4">{bootError}</div>}
         {currentRole === 'recruiter' && <RecruiterView />}
         {currentRole === 'candidate' && <CandidateView />}
         {currentRole === 'hiring-manager' && <HiringManagerView />}
         {currentRole === 'documentation' && <DocumentationView />}
       </main>
-      <LiveActivityFeed />
+      {activityOpen && (
+        <button
+          type="button"
+          className="mobile-shell-backdrop"
+          aria-label="Close activity feed"
+          onClick={() => setActivityOpen(false)}
+        />
+      )}
+      <LiveActivityFeed open={activityOpen} onClose={() => setActivityOpen(false)} />
       <AppTour
         open={tourOpen}
         includeDocumentation={currentRole === 'documentation'}
