@@ -48,7 +48,7 @@ export default function AuthSectionThree({
       <div className="grid min-h-[calc(100vh-1.5rem)] gap-6 lg:grid-cols-[0.94fr_1.06fr]">
         <div className="flex min-h-[760px] items-center justify-center rounded-md border border-black/10 bg-white px-6 py-12 dark:border-white/5 dark:bg-[#0a0a0c] lg:min-h-0 lg:px-14 lg:py-20 xl:px-20">
           <div className="mx-auto w-full max-w-[460px]">
-            <PipelineLogo tone="light" className="mb-10" />
+            <PipelineLogo tone="light" full className="mb-10" />
             <div>
               <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-black/40 dark:text-white/35">
                 Secure recruiting workspace
