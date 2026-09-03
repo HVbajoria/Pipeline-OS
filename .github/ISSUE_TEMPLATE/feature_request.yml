@@ -1,0 +1,66 @@
+name: Feature request
+description: Suggest an improvement to PipelineOS.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Do not include credentials, candidate data, resumes, production records, or other private information.
+
+        Security vulnerabilities and exposed secrets must be reported privately using [SECURITY.md](../../SECURITY.md), not in a feature request.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What user or product problem would this feature address?
+      placeholder: As a recruiter/candidate/hiring manager, I need ...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior or workflow you would like to see.
+      placeholder: Explain the desired experience, operation, API, or integration.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe workarounds or alternative approaches you considered.
+  - type: dropdown
+    id: audience
+    attributes:
+      label: Primary audience
+      options:
+        - Candidate
+        - Recruiter
+        - Hiring manager
+        - Interviewer
+        - Agent or ChatGPT/MCP user
+        - Maintainer or operator
+        - Multiple audiences
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Privacy and security considerations
+      description: Explain any effect on candidate data, recruiter data, tenant isolation, authorization, consent, MCP tools, or audit records.
+      placeholder: Describe the expected data access and security boundaries.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I have not included credentials, tokens, personal data, or confidential business information.
+          required: true
+        - label: This request is compatible with the project's proprietary license and authorized-collaborator policy.
+          required: true
