@@ -195,7 +195,9 @@ export async function createServerApp(
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     api.app.use((await import('express')).default.static(distPath));
-    api.app.get('*', (_request, response) => {
+    // Express 5 requires a named wildcard parameter; the brace form also
+    // matches the root path so the SPA fallback covers `/` and nested routes.
+    api.app.get('/{*splat}', (_request, response) => {
       response.sendFile(path.join(distPath, 'index.html'));
     });
   }
