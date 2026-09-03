@@ -75,6 +75,12 @@ export function resolveBodyLimit(options: SecurityOptions = {}): string {
  * to same-site so static assets and the API can be served from one origin.	 * the API can be served from one origin.
  */
 export function createSecurityHeaders(): RequestHandler {
+  const firebaseAuthDomain = process.env.VITE_FIREBASE_AUTH_DOMAIN?.trim();
+  const firebaseFrameSources = [
+    "'self'",
+    ...(firebaseAuthDomain === undefined ? [] : [`https://${firebaseAuthDomain}`])
+  ];
+
   return helmet({
     contentSecurityPolicy: {
       directives: {
@@ -82,9 +88,14 @@ export function createSecurityHeaders(): RequestHandler {
         "script-src": ["'self'", "'unsafe-inline'"],
         "style-src": ["'self'", "'unsafe-inline'"],
         "connect-src": ["'self'", "ws:", "wss:", "http:", "https:"],
+        "frame-src": firebaseFrameSources,
         "upgrade-insecure-requests": null
       }
     },
+    // Firebase signInWithPopup needs the OAuth popup to communicate with its
+    // opener. Helmet's stricter same-origin default can make Firebase report
+    // auth/internal-error even when the provider and domain are configured.
+    crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
     crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: { policy: 'same-site' }
   });

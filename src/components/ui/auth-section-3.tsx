@@ -209,8 +209,8 @@ export default function AuthSectionThree({
                   className="size-10 shrink-0 rounded-full border border-white/20 object-cover"
                 />
                 <div>
-                  <div className="font-semibold leading-tight text-white">Charlotte</div>
-                  <div className="mt-0.5 text-xs text-white/60">Design Engineer</div>
+                  <div className="font-semibold leading-tight text-white">Harshavardhan</div>
+                  <div className="mt-0.5 text-xs text-white/60">Talent Acquistion - Global Head</div>
                 </div>
               </motion.div>
               <motion.blockquote

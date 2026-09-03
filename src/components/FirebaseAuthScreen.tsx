@@ -22,6 +22,15 @@ function friendlyAuthError(error: unknown): string {
       return 'Use a password with at least six characters.';
     case 'auth/popup-blocked':
       return 'Your browser blocked the Google sign-in popup. Allow popups and try again.';
+    case 'auth/popup-closed-by-user':
+    case 'auth/cancelled-popup-request':
+      return 'The Google sign-in window was closed before authentication completed.';
+    case 'auth/unauthorized-domain':
+      return 'This website is not authorized for Firebase Google sign-in. Add pipelineos-lkol.onrender.com under Firebase Authentication → Settings → Authorized domains.';
+    case 'auth/invalid-api-key':
+      return 'The Firebase web configuration is invalid. Check the Render VITE_FIREBASE_* values.';
+    case 'auth/internal-error':
+      return 'Google sign-in was blocked by browser security settings or an incomplete Firebase configuration. Check the authorized domain and try again in a private window.';
     case 'auth/operation-not-allowed':
       return 'This sign-in method is not enabled in Firebase Authentication.';
     default:
