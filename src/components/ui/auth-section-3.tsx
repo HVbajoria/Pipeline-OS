@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent, type ReactNode } from 'react';
+import harshavardhanImage from '../../assets/Harshavardhan_Bajoria.jpg';
 import { FlutedGlass } from '@paper-design/shaders-react';
 import { Eye, EyeOff, Mail, UserPlus } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
@@ -204,13 +205,13 @@ export default function AuthSectionThree({
                 className="flex items-center gap-4"
               >
                 <img
-                  src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=160&q=80"
-                  alt="Charlotte"
+                  src={harshavardhanImage}
+                  alt="Harshavardhan Bajoria"
                   className="size-10 shrink-0 rounded-full border border-white/20 object-cover"
                 />
                 <div>
                   <div className="font-semibold leading-tight text-white">Harshavardhan</div>
-                  <div className="mt-0.5 text-xs text-white/60">Talent Acquistion - Global Head</div>
+                  <div className="mt-0.5 text-xs text-white/60">Talent Acquisition · Global Head</div>
                 </div>
               </motion.div>
               <motion.blockquote
