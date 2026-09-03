@@ -40,10 +40,10 @@ import {
 } from './actorContext';
 
 /** Bump when the server-side authorization semantics change. */
-export const AUTHORIZATION_POLICY_VERSION = 'p11.2.v1';
+export const AUTHORIZATION_POLICY_VERSION = 'p11.2.v2';
 export const DEFAULT_POLICY_VERSION = AUTHORIZATION_POLICY_VERSION;
 /** Stable public version for the actor-scoped capability projection. */
-export const CAPABILITY_MANIFEST_VERSION = 'p17.1.v1';
+export const CAPABILITY_MANIFEST_VERSION = 'p17.1.v2';
 
 export const AUTHORIZATION_ROLES = [
   'recruiter',
@@ -435,6 +435,7 @@ const RECRUITER_CAPABILITIES = [
 
 const CANDIDATE_CAPABILITIES = [
   'pipeline.operation.get_candidate_profile',
+  'pipeline.operation.answer_candidate_faq',
   'pipeline.operation.submit_application',
   'pipeline.operation.respond_to_offer',
   'pipeline.operation.enroll_benefits',
@@ -993,10 +994,19 @@ function discoveryScopeMode(
   return 'none';
 }
 
+function candidateFaqUsesOpenJobScope(
+  name: OperationName,
+  principal: TrustedPrincipal
+): boolean {
+  return name === 'answer_candidate_faq' && principal.roles.includes('candidate');
+}
+
 function discoveryResourceRequirement(
   name: OperationName,
   principal: TrustedPrincipal
 ): ResourceScopeRequirement | undefined {
+  if (candidateFaqUsesOpenJobScope(name, principal)) return undefined;
+
   const resourceType = discoveryResourceType(name);
   if (resourceType === undefined) return undefined;
 
@@ -1097,7 +1107,10 @@ export async function buildCapabilityManifest(
   let evaluatedPolicyVersion: string | undefined;
   for (const name of operationNames) {
     const descriptor = getOperationDescriptor(name);
-    const resourceRequirement = discoveryResourceRequirement(name, principal);
+    const candidateOpenJobFaq = candidateFaqUsesOpenJobScope(name, principal);
+    const resourceRequirement = candidateOpenJobFaq
+      ? undefined
+      : discoveryResourceRequirement(name, principal);
     const decision = await policy.decide({
       principal,
       operation: descriptor.name,
@@ -1111,8 +1124,9 @@ export async function buildCapabilityManifest(
     });
     evaluatedPolicyVersion ??= decision.policyVersion;
     const denialReason = publicDenialReason(decision);
-    const resourceScope =
-      resourceRequirement === undefined
+    const resourceScope = candidateOpenJobFaq
+      ? 'job:open'
+      : resourceRequirement === undefined
         ? 'unrestricted'
         : `${resourceRequirement.resourceType}:${
             decision.resourceScope.allowed

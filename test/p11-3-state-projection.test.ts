@@ -70,7 +70,7 @@ function sourcedProspect(
       capturedAt: TEST_TIMESTAMP,
       capturedBy: { actorType: 'human_ui', actorId: 'sarah-recruiter' },
       evidenceRef: 'consent-evidence-ref-1',
-      policyVersion: 'p11.2.v1'
+      policyVersion: 'p11.2.v2'
     },
     fieldOrigins: {
       sourceRecordId: 'github_public',

@@ -1,7 +1,7 @@
 /** Shared read-only handler for deterministic, requisition-only candidate FAQs. */
 
 import { composeFaqAnswer } from '../../shared/domain/faq';
-import { notFoundError } from '../../shared/errors';
+import { ForbiddenError, notFoundError } from '../../shared/errors';
 import type { AnswerCandidateFaqInput, AnswerCandidateFaqOutput } from '../../shared/operations';
 import { assertNonEmptyString, assertRecordId } from '../../shared/validators';
 import type { OperationHandler } from '../operationService';
@@ -27,6 +27,13 @@ export const answerCandidateFaq: OperationHandler<'answer_candidate_faq'> = (
       recordType: 'Job_Requisition',
       recordId: jobId,
       field: 'jobId'
+    });
+  }
+
+  if (context.principal?.roles.includes('candidate') && job.status !== 'open') {
+    throw new ForbiddenError('You do not have permission to perform this action', {
+      reason: 'resource_scope',
+      resourceScope: 'job:open'
     });
   }
 

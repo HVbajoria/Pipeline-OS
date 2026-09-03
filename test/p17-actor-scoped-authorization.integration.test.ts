@@ -329,7 +329,7 @@ function sourcedProspect(
       capturedAt: TEST_TIMESTAMP,
       capturedBy: RECRUITER,
       evidenceRef: `${id}-consent-reference`,
-      policyVersion: 'p11.2.v1'
+      policyVersion: 'p11.2.v2'
     },
     fieldOrigins: {
       sourceRecordId: 'github_public',
@@ -378,7 +378,7 @@ function approvalCard(
     blockers: ['Human review is required.'],
     requiredCapability: 'interview.coordinate',
     approvalPolicy: 'human',
-    policyVersion: 'p11.2.v1',
+    policyVersion: 'p11.2.v2',
     status: 'pending',
     expiresAt: '2099-01-01T00:00:00.000Z',
     correlationId: `${id}-correlation`,

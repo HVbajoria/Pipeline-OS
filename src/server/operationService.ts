@@ -424,7 +424,8 @@ function changedRecords(
 
 function resourceScopeFor(
   name: OperationName,
-  input: unknown
+  input: unknown,
+  principal?: TrustedPrincipal
 ): ResourceScopeRequirement | undefined {
   if (!isPlainObject(input)) return undefined;
   const value = (field: string): string | undefined =>
@@ -456,6 +457,10 @@ function resourceScopeFor(
     case 'create_job_requisition':
       return { resourceType: 'job', mode: 'assigned' };
     case 'answer_candidate_faq':
+      if (principal?.roles.includes('candidate')) return undefined;
+      return value('jobId') === undefined
+        ? undefined
+        : { resourceType: 'job', resourceIds: [value('jobId')!] };
     case 'get_interview_kit':
       return value('jobId') === undefined
         ? undefined
@@ -504,11 +509,31 @@ function resourceScopeFor(
     case 'plan_operation': {
       const target = input.targetOperation;
       return typeof target === 'string' && PLANABLE_OPERATION_NAMES.includes(target as never)
-        ? resourceScopeFor(target as OperationName, input.input)
+        ? resourceScopeFor(target as OperationName, input.input, principal)
         : undefined;
     }
     default:
       return undefined;
+  }
+}
+
+function assertCandidateFaqOpenJob(
+  name: OperationName,
+  input: unknown,
+  principal: TrustedPrincipal | undefined,
+  state: SharedStateWithCatalogs
+): void {
+  if (name !== 'answer_candidate_faq' || !principal?.roles.includes('candidate')) {
+    return;
+  }
+  if (!isPlainObject(input) || typeof input.jobId !== 'string') return;
+
+  const job = state.jobs.get(input.jobId);
+  if (job !== undefined && job.status !== 'open') {
+    throw new ForbiddenError('You do not have permission to perform this action', {
+      reason: 'resource_scope',
+      resourceScope: 'job:open'
+    });
   }
 }
 
@@ -1045,13 +1070,19 @@ export class OperationService {
 
   private async authorize(prepared: PreparedInvocation): Promise<void> {
     if (this.authorizationPolicy === undefined) return;
+    assertCandidateFaqOpenJob(
+      prepared.name,
+      prepared.input,
+      prepared.principal,
+      this.repository.read()
+    );
     const decision = await this.authorizationPolicy.decide({
       principal: prepared.principal ?? createUnauthenticatedPrincipal(),
       operation: prepared.name,
       mode: prepared.invocationContext?.mode ?? this.defaultMode(prepared.name),
       resourceScope:
         prepared.invocationContext?.resourceScope ??
-        resourceScopeFor(prepared.name, prepared.input),
+        resourceScopeFor(prepared.name, prepared.input, prepared.principal),
       approval: approvalForInput(
         this.repository,
         prepared.name,
@@ -1089,7 +1120,7 @@ export class OperationService {
       resourceScope:
         options.resourceScope ??
         prepared.invocationContext?.resourceScope ??
-        resourceScopeFor(targetOperation, targetInput),
+        resourceScopeFor(targetOperation, targetInput, principal),
       approval,
       consent:
         options.consent ??
@@ -1145,7 +1176,7 @@ export class OperationService {
       {
         // Never let an approval operation's caller-supplied scope or consent
         // replace the scope/consent captured in the protected target input.
-        resourceScope: resourceScopeFor(targetName, targetInput),
+        resourceScope: resourceScopeFor(targetName, targetInput, prepared.principal),
         consent: consentForInput(targetInput)
       }
     );
@@ -1491,7 +1522,7 @@ export class OperationService {
       'plan',
       undefined,
       {
-        resourceScope: resourceScopeFor(targetName, targetInput),
+        resourceScope: resourceScopeFor(targetName, targetInput, prepared.principal),
         consent: consentForInput(targetInput)
       }
     );
@@ -1950,7 +1981,7 @@ export class OperationService {
         'commit',
         { approvalId, status: 'approved', approvedBy: draftCard.approvedBy },
         {
-          resourceScope: resourceScopeFor(targetName, draftTargetInput),
+          resourceScope: resourceScopeFor(targetName, draftTargetInput, prepared.principal),
           consent: consentForInput(draftTargetInput)
         }
       );

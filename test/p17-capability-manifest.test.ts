@@ -69,7 +69,7 @@ describe('P17 capability manifest discovery', () => {
     );
 
     expect(manifest.manifestVersion).toBe(CAPABILITY_MANIFEST_VERSION);
-    expect(manifest.policyVersion).toBe('p11.2.v1');
+    expect(manifest.policyVersion).toBe('p11.2.v2');
     expect(manifest.actor).toEqual({
       actorType: 'human_ui',
       actorId: 'sarah-recruiter'
