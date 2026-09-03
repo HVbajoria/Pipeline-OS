@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import harshavardhanImage from '../../assets/Harshavardhan_Bajoria.jpg';
 import { FlutedGlass } from '@paper-design/shaders-react';
 import { Eye, EyeOff, Mail, UserPlus } from 'lucide-react';
@@ -17,13 +18,11 @@ export interface AuthSectionThreeProps {
   password: string;
   busy: boolean;
   error: string | null;
-  onModeChange: (mode: AuthSectionMode) => void;
   onFirstNameChange: (value: string) => void;
   onLastNameChange: (value: string) => void;
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onGoogleSignIn: () => void;
 }
 
 export default function AuthSectionThree({
@@ -34,63 +33,41 @@ export default function AuthSectionThree({
   password,
   busy,
   error,
-  onModeChange,
   onFirstNameChange,
   onLastNameChange,
   onEmailChange,
   onPasswordChange,
-  onSubmit,
-  onGoogleSignIn
+  onSubmit
 }: AuthSectionThreeProps) {
   const reduceMotion = useReducedMotion();
 
   return (
-    <section className="min-h-screen bg-white p-3 text-black antialiased [font-synthesis:none] dark:bg-[#050505] dark:text-white">
+    <section className="min-h-screen bg-[#050505] p-3 text-white antialiased [font-synthesis:none]">
       <div className="grid min-h-[calc(100vh-1.5rem)] gap-6 lg:grid-cols-[0.94fr_1.06fr]">
-        <div className="flex min-h-[760px] items-center justify-center rounded-md border border-black/10 bg-white px-6 py-12 dark:border-white/5 dark:bg-[#0a0a0c] lg:min-h-0 lg:px-14 lg:py-20 xl:px-20">
+        <div className="flex min-h-[760px] items-center justify-center rounded-md border border-white/5 bg-[#0a0a0c] px-6 py-12 lg:min-h-0 lg:px-14 lg:py-20 xl:px-20">
           <div className="mx-auto w-full max-w-[460px]">
-            <PipelineLogo tone="light" full className="mb-10" />
+            <PipelineLogo tone="dark" full className="mb-10" />
             <div>
-              <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-black/40 dark:text-white/35">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-white/35">
                 Secure recruiting workspace
               </p>
-              <h1 className="text-3xl font-medium tracking-tight text-black dark:text-white sm:text-4xl">
+              <h1 className="text-3xl font-medium tracking-tight text-white sm:text-4xl">
                 {mode === 'signin' ? 'Welcome back' : 'Create an account'}
               </h1>
-              <p className="mt-3 max-w-md text-sm leading-6 text-black/55 dark:text-white/45">
+              <p className="mt-3 max-w-md text-sm leading-6 text-white/45">
                 {mode === 'signin'
                   ? 'Sign in to continue your candidate, recruiter, or hiring team workflow.'
                   : 'Create a secure account for shared, auditable recruiting workflows.'}
               </p>
             </div>
 
-            <div className="mt-8">
-              <button
-                type="button"
-                onClick={onGoogleSignIn}
-                disabled={busy}
-                className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-black/15 bg-white px-4 text-sm font-medium text-black transition-colors hover:bg-black/[0.02] disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
-              >
-                <GoogleIcon />
-                <span className="whitespace-nowrap">
-                  {mode === 'signin' ? 'Continue with Google' : 'Sign up with Google'}
-                </span>
-              </button>
-            </div>
-
-            <div className="my-6 flex items-center gap-4 text-xs font-medium text-black/40 dark:text-white/30">
-              <div className="h-px flex-1 bg-black/10 dark:bg-white/10" />
-              or
-              <div className="h-px flex-1 bg-black/10 dark:bg-white/10" />
-            </div>
-
             {error && (
-              <div role="alert" className="mb-5 rounded-lg border border-red-200 bg-red-50 p-3 text-sm leading-5 text-red-800 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200">
+              <div role="alert" className="mt-8 rounded-lg border border-red-400/25 bg-red-400/10 p-3 text-sm leading-5 text-red-200">
                 {error}
               </div>
             )}
 
-            <form onSubmit={onSubmit} className="space-y-4">
+            <form onSubmit={onSubmit} className="mt-8 space-y-4">
               {mode === 'register' && (
                 <div className="grid gap-4 sm:grid-cols-2">
                   <InputField
@@ -129,17 +106,17 @@ export default function AuthSectionThree({
               />
 
               {mode === 'register' && (
-                <div className="space-y-3 pt-2 text-xs leading-5 text-black/45 dark:text-white/40 sm:text-[13px]">
+                <div className="space-y-3 pt-2 text-xs leading-5 text-white/40 sm:text-[13px]">
                   <CheckboxLine>
                     I would like occasional updates about PipelineOS recruiting workflows.
                   </CheckboxLine>
                   <CheckboxLine>
                     By creating an account, you agree to our{' '}
-                    <a href="#terms" className="font-medium text-black/55 underline underline-offset-2 dark:text-white/55">
+                    <a href="#terms" className="font-medium text-white/55 underline underline-offset-2">
                       Terms of Service
                     </a>{' '}
                     and{' '}
-                    <a href="#privacy" className="font-medium text-black/55 underline underline-offset-2 dark:text-white/55">
+                    <a href="#privacy" className="font-medium text-white/55 underline underline-offset-2">
                       Privacy Policy
                     </a>
                   </CheckboxLine>
@@ -149,28 +126,26 @@ export default function AuthSectionThree({
               <button
                 type="submit"
                 disabled={busy}
-                className="mt-8 flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-black/40 bg-black text-sm font-medium text-white transition-colors hover:bg-black/85 disabled:cursor-wait disabled:opacity-60 dark:border-white/40 dark:bg-white dark:text-black dark:hover:bg-white/85"
+                className="mt-8 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-white text-sm font-semibold text-black transition-colors hover:bg-white/85 disabled:cursor-wait disabled:opacity-60"
               >
                 {mode === 'signin' ? <Mail className="size-4" aria-hidden="true" /> : <UserPlus className="size-4" aria-hidden="true" />}
                 {busy ? 'Please wait…' : mode === 'signin' ? 'Sign in with email' : 'Create account'}
               </button>
             </form>
 
-            <p className="mt-6 text-center text-sm text-black/50 dark:text-white/45">
+            <p className="mt-6 text-center text-sm text-white/45">
               {mode === 'signin' ? 'New to PipelineOS?' : 'Already have an account?'}{' '}
-              <button
-                type="button"
-                onClick={() => onModeChange(mode === 'signin' ? 'register' : 'signin')}
-                disabled={busy}
-                className="font-semibold text-black underline underline-offset-2 transition-colors hover:text-black/60 disabled:opacity-50 dark:text-white dark:hover:text-white/70"
+              <Link
+                to={mode === 'signin' ? '/sign-up' : '/sign-in'}
+                className="font-semibold text-white underline underline-offset-2 transition-colors hover:text-white/70"
               >
                 {mode === 'signin' ? 'Create an account' : 'Sign in'}
-              </button>
+              </Link>
             </p>
           </div>
         </div>
 
-        <div className="relative flex min-h-[720px] flex-col overflow-hidden rounded-md bg-linear-to-b from-black to-white p-8 text-white dark:to-[#050505] sm:p-12 lg:min-h-0 lg:p-16">
+        <div className="relative flex min-h-[720px] flex-col overflow-hidden rounded-md bg-linear-to-b from-black to-[#050505] p-8 text-white sm:p-12 lg:min-h-0 lg:p-16">
           <div className="pointer-events-none absolute inset-0 z-0" aria-hidden="true">
             <FlutedGlass
               size={0.89}
@@ -221,7 +196,7 @@ export default function AuthSectionThree({
                 transition={{ duration: 0.8, delay: 0.12, ease: [0.22, 1, 0.36, 1] }}
                 className="mt-7 text-2xl font-light leading-tight tracking-[-0.035em] text-white/90 sm:text-3xl lg:text-[34px]"
               >
-                “PipelineOS gives every hiring team one clear, auditable path from sourcing to onboarding.”
+                &ldquo;PipelineOS gives every hiring team one clear, auditable path from sourcing to onboarding.&rdquo;
               </motion.blockquote>
             </div>
 
@@ -270,11 +245,11 @@ function InputField({
   const isPassword = type === 'password';
 
   return (
-    <div className="w-full space-y-1.5 text-left">
-      <label className="text-xs font-semibold text-black/60 dark:text-white/60">
+    <div className="w-full space-y-2 text-left">
+      <label className="block text-xs font-semibold uppercase tracking-wide text-white/55">
         {label}
       </label>
-      <div className="relative flex h-11 items-center rounded-lg border border-white/15 bg-black px-3.5 transition-colors focus-within:border-white/55 focus-within:ring-1 focus-within:ring-white/20">
+      <div className="group relative flex h-12 items-center rounded-xl border border-white/12 bg-white/[0.04] px-4 transition-colors focus-within:border-white/50 focus-within:bg-white/[0.06] focus-within:ring-2 focus-within:ring-white/15">
         <input
           type={isPassword && showPassword ? 'text' : type}
           value={value}
@@ -284,7 +259,7 @@ function InputField({
           disabled={disabled}
           required
           minLength={isPassword ? 6 : undefined}
-          className="w-full bg-transparent text-sm text-white caret-white outline-none placeholder:text-white/45 disabled:cursor-wait disabled:opacity-60"
+          className="h-full w-full bg-transparent text-sm text-white caret-white outline-none placeholder:text-white/35 disabled:cursor-wait disabled:opacity-60"
         />
         {isPassword && (
           <button
@@ -292,7 +267,7 @@ function InputField({
             onClick={() => setShowPassword((visible) => !visible)}
             disabled={disabled}
             aria-label={showPassword ? 'Hide password' : 'Show password'}
-            className="ml-2 shrink-0 text-white/55 transition-colors hover:text-white disabled:opacity-50"
+            className="ml-2 flex size-7 shrink-0 items-center justify-center rounded-md text-white/45 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
           >
             {showPassword ? <EyeOff className="size-4" aria-hidden="true" /> : <Eye className="size-4" aria-hidden="true" />}
           </button>
@@ -308,11 +283,11 @@ function CheckboxLine({ children }: { children: ReactNode }) {
       <span className="relative mt-1 size-3.5 shrink-0">
         <input
           type="checkbox"
-          className="peer size-full cursor-pointer appearance-none rounded-[3px] border border-black/25 bg-white checked:border-black checked:bg-black dark:border-white/30 dark:bg-white/5 dark:checked:border-white dark:checked:bg-white"
+          className="peer size-full cursor-pointer appearance-none rounded-[3px] border border-white/30 bg-white/5 checked:border-white checked:bg-white"
         />
         <svg
           viewBox="0 0 12 12"
-          className="pointer-events-none absolute inset-0 hidden size-full p-0.5 text-white peer-checked:block dark:text-black"
+          className="pointer-events-none absolute inset-0 hidden size-full p-0.5 text-black peer-checked:block"
           fill="none"
           aria-hidden="true"
         >
@@ -369,16 +344,5 @@ function DashboardMockup() {
         </div>
       </div>
     </div>
-  );
-}
-
-function GoogleIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
-      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09Z" fill="#4285F4" />
-      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23Z" fill="#34A853" />
-      <path d="M5.84 14.1c-.22-.66-.35-1.36-.35-2.1s.13-1.44.35-2.1V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l3.66-2.84Z" fill="#FBBC05" />
-      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84C6.71 7.3 9.14 5.38 12 5.38Z" fill="#EB4335" />
-    </svg>
   );
 }

@@ -1,5 +1,6 @@
 import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import App from './App.tsx';
 import FirebaseAuthScreen, { friendlyAuthError } from './components/FirebaseAuthScreen';
 import PipelineLogo from './components/PipelineLogo';
@@ -56,6 +57,18 @@ function AuthenticatedApplication({ session, onSignedOut }: { session: FirebaseS
     onSignedOut();
   };
   return <BootstrappedApp session={session} onSignOut={signOut} />;
+}
+
+function SignedOutRoutes({ error }: { error?: string }) {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/sign-in" element={<FirebaseAuthScreen mode="signin" initialError={error} />} />
+        <Route path="/sign-up" element={<FirebaseAuthScreen mode="register" initialError={error} />} />
+        <Route path="*" element={<Navigate to="/sign-in" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
 }
 
 function AuthenticatedRoot() {
@@ -133,7 +146,7 @@ function AuthenticatedRoot() {
       </main>
     );
   }
-  return <FirebaseAuthScreen initialError={state.error} />;
+  return <SignedOutRoutes error={state.error} />;
 }
 
 createRoot(document.getElementById('root')!).render(
