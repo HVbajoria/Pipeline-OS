@@ -1386,7 +1386,12 @@ export class OperationService {
   ): Promise<OperationOutputMap[OperationName]> {
     const adapter = this.orchestrationAdapters.get(prepared.name);
     if (adapter === undefined) return execute();
-
+    if (typeof adapter !== 'function') {
+      throw new InternalError(
+        `Operation orchestration adapter is not callable: ${prepared.name}`,
+        { field: 'operationName' }
+      );
+    }
     const snapshot = this.repository.read();
     const context = this.createHandlerContext(
       prepared.name,
