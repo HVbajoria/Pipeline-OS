@@ -1,5 +1,12 @@
 # PipelineOS
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![WebMCP](https://img.shields.io/badge/WebMCP-native-6f42c1)](#webmcp-http-actor-context-and-fallback-behavior)
+[![Node](https://img.shields.io/badge/Node-20%2B-339933?logo=node.js&logoColor=white)](#local-setup)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Render-46E3B7?logo=render&logoColor=white)](https://pipelineos-lkol.onrender.com)
+
+**Built by [Harshavardhan Bajoria](https://github.com/HVbajoria)**
+
 PipelineOS is a WebMCP-native recruiting platform that models the complete hiring workflow from requisition creation through onboarding. A recruiter, candidate, hiring manager, or external agent can use the same named operations against the same live state. The demo is intentionally deterministic: the repository, catalogs, availability calendars, role templates, and seed IDs are stable, while operation IDs and timestamps are supplied by injectable repository dependencies.
 
 ## Product at a glance
@@ -15,9 +22,64 @@ PipelineOS demonstrates a shared human-and-agent recruiting system rather than a
 
 The application is a deterministic demo/reference implementation with an in-memory repository, not a production identity provider or durable database. Non-production demo requests accept only known seeded identities; the production composition root requires a trusted host resolver, and arbitrary actor headers are never authentication. Every authorized state projection is actor/resource scoped.
 
+## Problem statement
+
+Recruiting today is split between two disconnected worlds: a human clicking through dashboards, and an AI agent that can only "look" at a page through screen scraping or brittle, unofficial automation. Before WebMCP, that gap made several things difficult or outright impossible:
+
+- **No reliable action surface for agents.** An agent (a ChatGPT connector, an autonomous recruiting assistant, a candidate's own copilot) could read a rendered page, but it had no standard, structured way to discover *what it was allowed to do* or *call the same functions a human would click*. Every integration meant a bespoke, fragile scraper or a private backend API with no shared contract.
+- **No shared source of truth.** Because the agent's "actions" were not the same code path as the UI's actions, a human and an agent working on the same requisition could silently drift out of sync, double-book an interview slot, or duplicate an application.
+- **No safe way to let an agent act on consequential steps.** Sending an offer, importing a candidate's public profile, or booking an interview are high-stakes actions. Without a common tool contract, there was no consistent place to enforce "a human must approve this before it becomes real."
+- **No auditable, explainable trail.** When an agent and a human both touch the same workflow, you need one activity log that says who did what, with what input, and what happened — not two disconnected systems with two different notions of "truth."
+
+**What PipelineOS makes possible instead:** a recruiter, a candidate, a hiring manager, and an external agent all call the *exact same 32 named operations* against the *exact same live state*, through the *exact same validation, authorization, and audit path* — whether the caller is a React button click, a native `document.modelContext.registerTool` call in the browser, or a remote MCP client like ChatGPT. The agent can search candidates, propose interview slots, and draft an offer on its own; a human stays the only one who can approve or execute the steps that can't be undone.
+
+```mermaid
+flowchart LR
+    subgraph before["Before WebMCP"]
+        direction TB
+        H1["Human"] -->|clicks UI| B1["App-specific UI logic"]
+        A1["Agent"] -.->|scrapes / guesses| B1
+        B1 -.->|no shared contract| DB1[("Backend state")]
+    end
+
+    subgraph after["With WebMCP (PipelineOS)"]
+        direction TB
+        H2["Human"] -->|clicks UI| OP["Shared operation registry\n32 typed tools"]
+        A2["Agent"] -->|"document.modelContext.registerTool"| OP
+        OP --> Guard["Validation + authorization\n+ human approval gate"]
+        Guard --> DB2[("Shared_State\n(single source of truth)")]
+        DB2 --> Log["One audit trail\nfor humans and agents"]
+    end
+
+    before -.->|evolves into| after
+```
+
 ## Why WebMCP?
 
-Before WebMCP, an agent could see a web page but could not reliably discover and invoke the page’s structured application actions. PipelineOS exposes recruiting operations as typed tools, allowing an agent to search, propose, coordinate, and report through the same workflow as a human user, while humans retain approval over consequential actions.
+Before WebMCP, an agent could see a web page but could not reliably discover and invoke the page's structured application actions. PipelineOS exposes recruiting operations as typed tools, allowing an agent to search, propose, coordinate, and report through the same workflow as a human user, while humans retain approval over consequential actions.
+
+```mermaid
+flowchart TB
+    Reg["OPERATION_REGISTRY\n32 canonical operations\n(shared schemas + annotations)"]
+
+    Reg --> UIPath["React role views\n(human click)"]
+    Reg --> WebMCPPath["document.modelContext.registerTool\n(in-browser agent, e.g. Chrome/ChatGPT)"]
+    Reg --> MCPPath["POST /mcp\n(remote MCP client, e.g. ChatGPT connector)"]
+
+    UIPath --> Client["OperationClient"]
+    WebMCPPath --> Client
+    MCPPath --> Service
+
+    Client --> Service["OperationService.invoke\n(validate, authorize, audit)"]
+    Service --> Approval{"Consequential\naction?"}
+    Approval -- "yes: plan_operation" --> Human["Human approval\n(approve_operation_plan)"]
+    Human --> Commit["commit_operation_plan"]
+    Approval -- "no: read-only or\nreversible mutation" --> Commit
+    Commit --> Repo[("SharedStateRepository")]
+    Repo --> Everyone["Every view + every agent\nsees the same next state"]
+```
+
+This is the core of "better UX": a human and an agent are not using two different systems that happen to look similar. They are using **one** operation contract, so an agent's proposal, a recruiter's click, and a candidate's decision all show up in the same Kanban board, the same activity feed, and the same audit trail, in real time.
 
 ## Product architecture
 
@@ -263,7 +325,7 @@ The repository keeps maps internally for lookup and serializes stable arrays thr
 
 ```mermaid
 sequenceDiagram
-    actor Actor
+    actor User as Actor
     participant UI as React UI or WebMCP
     participant Client as OperationClient
     participant API as Express API
@@ -272,7 +334,7 @@ sequenceDiagram
     participant SSE as Revision SSE
     participant Store as Zustand store
 
-    Actor->>UI: Invoke named operation
+    User->>UI: Invoke named operation
     UI->>Client: invoke(name, input, actor)
     Client->>API: POST /api/operations/:name { input }
     API->>Service: resolve actor and dispatch
@@ -545,6 +607,39 @@ Canonical mutation responses may include `X-Correlation-Id`, `X-Trace-Id`, `X-Sp
 
 A canonical operation has one persisted root activity trace. Handler and coordinator spans are bounded and redacted; coordinator internals deliberately remain direct children of the operation root, while `handler:<operation>` is another root child for compatibility with the existing trace context. Activity projection removes idempotency keys, fingerprints, raw consent evidence, tokens, authorization headers, and private upstream payloads. This is a demonstration boundary: production deployments must replace the in-memory repository/ledger and demo actor resolver with durable storage and a trusted identity provider.
 
+## Social impact
+
+Recruiting friction has real, unequal costs: candidates lose track of where they stand, recruiters drown in repetitive screening and scheduling, and smaller teams without dedicated recruiting-ops staff fall back on manual spreadsheets. A shared, agent-callable operation layer changes who can participate in hiring, and how fairly it happens:
+
+- **Lowers the floor for small teams and nonprofits.** A small hiring team can point a general-purpose agent (their own assistant, not a specialized recruiting SaaS) at PipelineOS's tools and get sourcing, screening, and scheduling support without buying or building a bespoke ATS integration.
+- **Reduces candidate-side information asymmetry.** A candidate's own agent can check application status, interview slots, or benefits enrollment through the same `get_*` tools a recruiter uses — not a stripped-down candidate-only view with less information.
+- **Keeps consequential decisions human.** Because `send_offer`, `respond_to_offer`, and `import_public_prospect` cannot be executed directly by an agent, automation speeds up the repetitive 80% of hiring work without letting an algorithm silently reject, hire, or contact someone without a person in the loop.
+- **Auditable by design.** Every action, human or agent, produces one activity entry with actor, input, and outcome. That is the same trail a fairness or compliance review would need, produced for free as a side effect of how the system already works, not bolted on afterward.
+- **Consent-first sourcing.** Public prospect data (GitHub, public job boards) is never silently absorbed into a candidate record; `import_public_prospect` requires explicit consent plus human approval, and `revoke_public_prospect_consent` gives that consent a real, enforced withdrawal path.
+
+## Future scope
+
+```mermaid
+flowchart LR
+    Now["Today\nDeterministic demo\nIn-memory or Firestore"] --> Near["Near-term"]
+    Near --> Later["Longer-term"]
+
+    Near --> N1["Real ATS/HRIS connectors\n(Greenhouse, Lever)"]
+    Near --> N2["Durable multi-tenant storage\nby default"]
+    Near --> N3["Richer agent policies\n(per-tenant approval rules)"]
+
+    Later --> L1["Marketplace of third-party\nWebMCP recruiting agents"]
+    Later --> L2["Cross-company agent workflows\n(referrals, shared talent pools)"]
+    Later --> L3["Agent-assisted fairness auditing\nover the activity log"]
+```
+
+- **Real integrations behind the same registry.** Swap the synthetic candidate/job data for real Greenhouse/Lever/HRIS connectors without changing a single operation name, schema, or WebMCP tool — the registry is already the seam.
+- **Durable multi-tenant storage as the default,** not an opt-in, so any deployment survives restarts and scales horizontally out of the box (the Firestore path already proves the pattern).
+- **Finer-grained, per-tenant agent policy.** Let each organization tune which of the 32 operations an agent may call directly versus which require `plan_operation`, instead of one global policy.
+- **An ecosystem of agents, not just one.** Because the tool surface is standard WebMCP/MCP, any compliant agent — a recruiting copilot, a candidate's personal assistant, a compliance bot — can plug into the same operations without a custom integration per agent.
+- **Agent-assisted audits.** Point a read-only agent at the existing activity log to surface bias, bottleneck, or SLA-violation patterns across the hiring funnel, using the same audit trail that already exists for every operation.
+- **Cross-organization workflows.** Extend the actor/tenant model so a referral or shared-candidate-pool workflow between two companies' PipelineOS instances is just another set of scoped operations, not a new integration.
+
 ## Local setup
 
 ### Prerequisites
@@ -599,6 +694,27 @@ Exposing `/api/*` and `/mcp` to the public internet — and to an LLM host such 
 - **Operation execution timeout** (`operationTimeoutMs`, default 20s) in `OperationService`. Because invocations are serialized, a hung handler (for example a stalled upstream call driven by an agent) would otherwise block every subsequent operation; on timeout the invocation rejects with a structured error and the queue proceeds. Handlers only mutate an isolated draft committed atomically, so a late completion cannot corrupt state.
 
 ### Agent (LLM) safety: irreversible mutations require a human
+
+```mermaid
+sequenceDiagram
+    actor Agent as "Agent (e.g. ChatGPT connector)"
+    actor Human as "Human (recruiter/candidate)"
+    participant Svc as OperationService
+    participant Repo as SharedStateRepository
+
+    Agent->>Svc: plan_operation(target, input)
+    Svc->>Repo: run isolated preview (no mutation)
+    Repo-->>Svc: preview result
+    Svc-->>Agent: approval card (redacted)
+    Agent->>Human: show approval card
+    Human->>Svc: approve_operation_plan(approvalId)
+    Note over Svc: Agent principals are always denied here
+    Svc-->>Human: plan approved
+    Agent->>Svc: commit_operation_plan(approvalId)
+    Svc->>Repo: revalidate + apply atomically
+    Repo-->>Svc: committed result
+    Svc-->>Agent: target result wrapper
+```
 
 The plan → approve → commit lifecycle is the human-in-the-loop safety pattern, and two additional invariants protect against an autonomous agent (for example a ChatGPT connector) taking irreversible action on its own:
 
