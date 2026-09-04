@@ -56,7 +56,7 @@ export interface FirebaseAuthOptions
   /** Optional durable session store supplied by the composition root. */
   store?: WebSessionStore;
   /** Optional best-effort user profile/action projection. */
-  userStore?: Pick<UserActivityStore, 'upsertIdentity'>;
+  userStore?: Pick<UserActivityStore, 'upsertIdentity' | 'getIdentity'>;
   /** Test seam for Firebase Admin token verification. */
   verifyIdToken?: (
     token: string,
@@ -197,6 +197,34 @@ function claimsFromFirebaseToken(
   return claims;
 }
 
+async function claimsWithStoredIdentity(
+  claims: VerifiedIdentityClaims,
+  userStore: FirebaseAuthOptions['userStore']
+): Promise<VerifiedIdentityClaims> {
+  if (userStore === undefined) return claims;
+  try {
+    const stored = await userStore.getIdentity(claims.subject, claims.tenantId);
+    if (stored === undefined || stored.roles.length === 0) return claims;
+    return {
+      ...claims,
+      // The server-managed Firestore user record is authoritative after the
+      // initial account bootstrap. Browser requestedRole and token roles never
+      // overwrite an existing stored role.
+      roles: [...stored.roles],
+      ...(stored.displayName === undefined && claims.displayName === undefined
+        ? {}
+        : { displayName: stored.displayName ?? claims.displayName }),
+      ...(stored.email === undefined && claims.email === undefined
+        ? {}
+        : { email: stored.email ?? claims.email })
+    };
+  } catch {
+    // A temporary profile-read failure should not make a valid Firebase token
+    // unusable; the verified token claims remain the safe fallback.
+    return claims;
+  }
+}
+
 function bearerToken(request: Request): string | undefined {
   const value = request.headers.authorization;
   if (typeof value !== 'string') return undefined;
@@ -251,7 +279,8 @@ export function installFirebaseAuthRoutes(
         return;
       }
       const decoded = await verifyIdToken(token, true);
-      const claims = claimsFromFirebaseToken(decoded, options, requestedRole(request));
+      const tokenClaims = claimsFromFirebaseToken(decoded, options, requestedRole(request));
+      const claims = await claimsWithStoredIdentity(tokenClaims, options.userStore);
       void Promise.resolve(options.userStore?.upsertIdentity({
         subject: claims.subject,
         tenantId: claims.tenantId,
@@ -302,7 +331,11 @@ export function installFirebaseAuthRoutes(
       response.json({ authenticated: false });
       return;
     }
-    publicSessionResponse(response, session);
+    const claims = await claimsWithStoredIdentity(session.claims, options.userStore);
+    if (claims !== session.claims) {
+      await store.set({ ...session, claims });
+    }
+    publicSessionResponse(response, { ...session, claims });
   });
 
   return store;
@@ -346,6 +379,7 @@ export function firebaseAuthOptionsFromEnv(): FirebaseAuthOptions | undefined {
 export function createFirebaseSessionResolver(options: FirebaseAuthOptions) {
   return createWebSessionResolver({
     cookieSecret: options.cookieSecret,
-    store: options.store
+    store: options.store,
+    resolveClaims: (claims) => claimsWithStoredIdentity(claims, options.userStore)
   });
 }

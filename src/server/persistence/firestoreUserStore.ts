@@ -1,6 +1,10 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import type { ActivityLogEntry, ActorType } from '../../shared/models';
-import type { AuthorizationRole, TrustedPrincipal } from '../authorization';
+import {
+  AUTHORIZATION_ROLES,
+  type AuthorizationRole,
+  type TrustedPrincipal
+} from '../authorization';
 
 const DEFAULT_COLLECTION = 'users';
 const DEFAULT_ACTIONS_SUBCOLLECTION = 'actions';
@@ -18,6 +22,10 @@ export interface UserIdentity {
 
 export interface UserActivityStore {
   upsertIdentity(identity: UserIdentity): void | Promise<void>;
+  getIdentity(
+    subject: string,
+    tenantId: string
+  ): UserIdentity | undefined | Promise<UserIdentity | undefined>;
   recordActivity(
     activity: ActivityLogEntry,
     principal?: TrustedPrincipal
@@ -77,6 +85,26 @@ function nonEmpty(value: string | undefined): string | undefined {
   return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
 }
 
+const KNOWN_ROLES = new Set<string>([
+  ...(AUTHORIZATION_ROLES as readonly string[]),
+  'hiring-manager'
+]);
+
+function storedRoles(data: Partial<UserDocument>): AuthorizationRole[] {
+  if (typeof data.role === 'string' && KNOWN_ROLES.has(data.role)) {
+    return [data.role as AuthorizationRole];
+  }
+  if (!Array.isArray(data.roles)) return [];
+  return data.roles.filter(
+    (role): role is AuthorizationRole =>
+      typeof role === 'string' && KNOWN_ROLES.has(role)
+  );
+}
+
+function actorType(value: unknown): ActorType {
+  return value === 'agent' ? 'agent' : 'human_ui';
+}
+
 function errorCodeFromActivity(activity: ActivityLogEntry): string | undefined {
   const output = activity.output as Record<string, unknown>;
   const error = output.error;
@@ -129,6 +157,30 @@ export class FirestoreUserStore implements UserActivityStore {
     void initialization;
   }
 
+  async getIdentity(
+    subject: string,
+    tenantId: string
+  ): Promise<UserIdentity | undefined> {
+    const snapshot = await this.userReference(tenantId, subject).get();
+    if (!snapshot.exists) return undefined;
+    const data = snapshot.data() as Partial<UserDocument> | undefined;
+    if (data === undefined || data.tenantId !== tenantId) return undefined;
+    const roles = storedRoles(data);
+    if (roles.length === 0) return undefined;
+    const displayName = nonEmpty(data.displayName ?? data.name);
+    const email = nonEmpty(data.email);
+    return {
+      subject,
+      tenantId,
+      actorType: actorType(data.actorType),
+      roles,
+      ...(displayName === undefined ? {} : { displayName }),
+      ...(email === undefined ? {} : { email }),
+      ...(data.source === undefined ? {} : { source: data.source }),
+      ...(data.policyVersion === undefined ? {} : { policyVersion: data.policyVersion })
+    };
+  }
+
   upsertIdentity(identity: UserIdentity): void {
     const work = this.enqueue(async () => {
       const now = new Date().toISOString();
@@ -139,13 +191,15 @@ export class FirestoreUserStore implements UserActivityStore {
         : undefined;
       const displayName = nonEmpty(identity.displayName);
       const email = nonEmpty(identity.email);
+      const roles = storedRoles(existingData ?? {});
+      const effectiveRoles = roles.length > 0 ? roles : [...new Set(identity.roles)];
       const document: UserDocument = {
         userId: identity.subject,
         subject: identity.subject,
         tenantId: identity.tenantId,
         actorType: identity.actorType,
-        roles: [...new Set(identity.roles)],
-        ...(identity.roles[0] === undefined ? {} : { role: identity.roles[0] }),
+        roles: effectiveRoles,
+        ...(effectiveRoles[0] === undefined ? {} : { role: effectiveRoles[0] }),
         ...(displayName === undefined ? {} : { displayName, name: displayName }),
         ...(email === undefined ? {} : { email }),
         ...(identity.source === undefined ? {} : { source: identity.source }),
@@ -191,13 +245,15 @@ export class FirestoreUserStore implements UserActivityStore {
         : undefined;
       const displayName = nonEmpty(identity.displayName);
       const email = nonEmpty(identity.email);
+      const roles = storedRoles(existingData ?? {});
+      const effectiveRoles = roles.length > 0 ? roles : [...new Set(identity.roles)];
       const userDocument: UserDocument = {
         userId: identity.subject,
         subject: identity.subject,
         tenantId: identity.tenantId,
         actorType: identity.actorType,
-        roles: [...new Set(identity.roles)],
-        ...(identity.roles[0] === undefined ? {} : { role: identity.roles[0] }),
+        roles: effectiveRoles,
+        ...(effectiveRoles[0] === undefined ? {} : { role: effectiveRoles[0] }),
         ...(displayName === undefined ? {} : { displayName, name: displayName }),
         ...(email === undefined ? {} : { email }),
         ...(identity.source === undefined ? {} : { source: identity.source }),

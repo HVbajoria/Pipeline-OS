@@ -197,7 +197,11 @@ export function clearSessionCookie(response: Response, secure: boolean): void {
  * web UI is authorized exactly like every other surface.
  */
 export function createWebSessionResolver(
-  options: Pick<WebAuthOptions, 'cookieSecret' | 'store'>
+  options: Pick<WebAuthOptions, 'cookieSecret' | 'store'> & {
+    resolveClaims?: (
+      claims: VerifiedIdentityClaims
+    ) => VerifiedIdentityClaims | PromiseLike<VerifiedIdentityClaims>;
+  }
 ): (
   request: Request
 ) => Promise<TrustedPrincipal | undefined> {
@@ -211,7 +215,10 @@ export function createWebSessionResolver(
     const session = await store.get(sessionId);
     if (session === undefined) return undefined;
     try {
-      return createTrustedPrincipal(principalInputFromClaims(session.claims));
+      const claims = options.resolveClaims === undefined
+        ? session.claims
+        : await options.resolveClaims(session.claims);
+      return createTrustedPrincipal(principalInputFromClaims(claims));
     } catch {
       return undefined;
     }
