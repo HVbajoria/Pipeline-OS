@@ -526,7 +526,7 @@ const DEMO_RECRUITER_SCOPES: readonly ResourceScope[] = [
   {
     resourceType: 'candidate',
     mode: 'assigned',
-    resourceIds: ['cand-1', 'cand-2', 'cand-3']
+    resourceIds: ['cand-1', 'cand-2', 'cand-3', 'cand-4', 'cand-5', 'cand-6', 'cand-7', 'cand-8']
   },
   { resourceType: 'panel', mode: 'assigned', resourceIds: ['panel-1'] },
   { resourceType: 'application', mode: 'assigned' },
@@ -551,7 +551,7 @@ const DEMO_HIRING_MANAGER_SCOPES: readonly ResourceScope[] = [
   {
     resourceType: 'candidate',
     mode: 'assigned',
-    resourceIds: ['cand-1', 'cand-2', 'cand-3']
+    resourceIds: ['cand-1', 'cand-2', 'cand-3', 'cand-4', 'cand-5', 'cand-6', 'cand-7', 'cand-8']
   },
   { resourceType: 'application', mode: 'assigned' },
   { resourceType: 'panel', mode: 'assigned', resourceIds: ['panel-1'] }
@@ -599,7 +599,7 @@ export const DEMO_ACTOR_DEFINITIONS: Readonly<
       {
         resourceType: 'candidate',
         mode: 'delegated',
-        resourceIds: ['cand-1', 'cand-2', 'cand-3']
+        resourceIds: ['cand-1', 'cand-2', 'cand-3', 'cand-4', 'cand-5', 'cand-6', 'cand-7', 'cand-8']
       },
       { resourceType: 'application', mode: 'delegated' },
       { resourceType: 'offer', mode: 'delegated' },

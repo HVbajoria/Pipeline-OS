@@ -15,8 +15,8 @@ import {
   approvalOperationAdapters,
   defaultOperationHandlers
 } from './src/server/operations';
-import { SharedStateRepository } from './src/server/repository';
-import { createSeed } from './src/server/seed';
+import { SharedStateRepository, type RepositorySeed } from './src/server/repository';
+import { createDemoSeed } from './src/server/seed';
 import { StateEventPublisher } from './src/server/events';
 import { PublicJobsCoordinator } from './src/server/imports/publicJobs';
 import {
@@ -55,6 +55,9 @@ export interface ServerOptions extends PipelineApiOptions {
   resolveTrustedPrincipal?: ProductionTrustedPrincipalResolver;
   /** Real auth provider (web OIDC session and/or MCP OAuth bearer). */
   authProvider?: AuthProvider;
+  /** Initial/reset seed for the process-owned demo repository. */
+  seed?: RepositorySeed;
+  resetSeed?: RepositorySeed;
 }
 
 export interface ServerComposition {
@@ -88,6 +91,8 @@ export async function createServerApp(
     });
   const authorizationPolicy =
     options.authorizationPolicy ?? createAuthorizationPolicy({ environment });
+  const configuredSeed = options.seed ?? createDemoSeed();
+  const configuredResetSeed = options.resetSeed ?? configuredSeed;
 
   // Durable persistence: when Firestore is configured (credentials present and
   // not explicitly disabled), replace the in-memory repository, idempotency
@@ -102,6 +107,8 @@ export async function createServerApp(
   ) {
     try {
       durablePersistence = await createDurablePersistence({
+        seed: configuredSeed,
+        resetSeed: configuredResetSeed,
         onError: (error, context) =>
           getLogger().error(
             { err: error, store: context.store, operation: context.operation },
@@ -124,7 +131,10 @@ export async function createServerApp(
     options.operationService?.repository ??
     options.repository ??
     durablePersistence?.repository ??
-    new SharedStateRepository(createSeed());
+    new SharedStateRepository({
+      seed: configuredSeed,
+      resetSeed: configuredResetSeed
+    });
   const operationService =
     options.operationService ??
     new OperationService({

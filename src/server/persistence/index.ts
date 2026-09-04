@@ -27,6 +27,7 @@ import {
 import { FirestoreWebSessionStore } from './firestoreWebSessionStore';
 import { FirestoreUserStore } from './firestoreUserStore';
 import type { WebSessionStore } from '../auth/webSession';
+import type { RepositorySeed } from '../repository';
 
 export * from './firestore';
 export * from './stateSerialization';
@@ -37,6 +38,10 @@ export { FirestoreUserStore } from './firestoreUserStore';
 export * from './firestoreNormalizedState';
 
 export interface DurablePersistenceOptions extends FirestoreBootstrapOptions {
+  /** Seed used when the durable state has not been initialized yet. */
+  seed?: RepositorySeed;
+  /** Seed restored by repository.reset() when no explicit seed is supplied. */
+  resetSeed?: RepositorySeed;
   /** Reuse an existing Firestore instance instead of bootstrapping one. */
   firestore?: Firestore;
   /** Adopt cross-instance revisions via onSnapshot. Default true. */
@@ -102,6 +107,8 @@ export async function createDurablePersistence(
 
   const repositoryOptions: FirestoreStateRepositoryOptions = {
     firestore,
+    ...(options.seed === undefined ? {} : { seed: options.seed }),
+    ...(options.resetSeed === undefined ? {} : { resetSeed: options.resetSeed }),
     invocationLedger: ledger,
     ...(options.collections?.state === undefined
       ? {}

@@ -131,6 +131,8 @@ export type StateListener = RepositoryListener;
 
 export interface SharedStateRepositoryOptions {
   seed?: RepositorySeed;
+  /** Seed restored by reset() when no explicit seed is supplied. */
+  resetSeed?: RepositorySeed;
   clock?: Clock;
   idGenerator?: IdGenerator;
   /** Server-private idempotency storage; never included in read/snapshot. */
@@ -168,6 +170,7 @@ function isRepositoryOptions(value: unknown): value is SharedStateRepositoryOpti
   if (typeof value !== 'object' || value === null) return false;
   return (
     'seed' in value ||
+    'resetSeed' in value ||
     'clock' in value ||
     'idGenerator' in value ||
     'ledger' in value ||
@@ -280,6 +283,7 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
  */
 export class SharedStateRepository {
   private state: SharedStateWithCatalogs;
+  private readonly resetSeed: RepositorySeed;
   private readonly listeners = new Set<RepositoryListener>();
 
   readonly clock: Clock;
@@ -325,6 +329,7 @@ export class SharedStateRepository {
     }
 
     this.state = normalizeSeed(seed);
+    this.resetSeed = deepClone(options.resetSeed ?? seed);
     this.clock = options.clock ?? new SystemClock();
     this.idGenerator = options.idGenerator ?? new UuidIdGenerator();
     this.invocationLedger =
@@ -434,7 +439,7 @@ export class SharedStateRepository {
    * monotonically increasing for subscribers even though domain collections
    * return to their seed values.
    */
-  reset(seed: RepositorySeed = createSeed()): SharedStateWithCatalogs {
+  reset(seed: RepositorySeed = this.resetSeed): SharedStateWithCatalogs {
     const next = normalizeSeed(seed);
     // Demo approval/provenance and idempotency records are ephemeral. A
     // durable host may supply a ledger with its own retention policy, but the
