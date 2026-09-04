@@ -43,6 +43,8 @@ export interface VerifiedIdentityClaims {
   roles: readonly AuthorizationRole[];
   /** Whether this identity is a human user or a delegated agent. */
   actorType?: ActorType;
+  /** Optional verified display name, kept only for user display/audit. */
+  displayName?: string;
   /** Optional email, kept only for display/audit; never used for authz. */
   email?: string;
   /**
@@ -196,6 +198,8 @@ export function principalInputFromClaims(
     ...(capabilities.length > 0 ? { capabilities } : {}),
     ...(claims.consentScopes !== undefined && claims.consentScopes.length > 0
       ? { consentScopes: [...claims.consentScopes] }
-      : {})
+      : {}),
+    ...(claims.displayName === undefined ? {} : { displayName: claims.displayName }),
+    ...(claims.email === undefined ? {} : { email: claims.email })
   };
 }

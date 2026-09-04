@@ -34,6 +34,7 @@ import {
   type WebSessionStore
 } from './webSession';
 import type { VerifiedIdentityClaims } from './identityClaims';
+import type { UserActivityStore } from '../persistence/firestoreUserStore';
 
 const DEFAULT_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const DEFAULT_ROLE: AuthorizationRole = 'candidate';
@@ -54,6 +55,8 @@ export interface FirebaseAuthOptions
   defaultRole?: AuthorizationRole;
   /** Optional durable session store supplied by the composition root. */
   store?: WebSessionStore;
+  /** Optional best-effort user profile/action projection. */
+  userStore?: Pick<UserActivityStore, 'upsertIdentity'>;
   /** Test seam for Firebase Admin token verification. */
   verifyIdToken?: (
     token: string,
@@ -66,6 +69,7 @@ export interface FirebaseSessionInfo {
   subject: string;
   tenantId: string;
   roles: readonly AuthorizationRole[];
+  displayName?: string;
   email?: string;
 }
 
@@ -180,6 +184,9 @@ function claimsFromFirebaseToken(
     // Firebase users are human principals. Never let a browser claim turn a
     // normal Firebase account into a delegated agent.
     actorType: 'human_ui',
+    ...(typeof token.name === 'string' && token.name.trim().length > 0
+      ? { displayName: token.name.trim() }
+      : {}),
     ...(typeof token.email === 'string' ? { email: token.email } : {}),
     ...(claimResourceIds(token) === undefined ? {} : { resourceIds: claimResourceIds(token) }),
     ...(claimStringArray(token, 'consent_scopes', 'consentScopes').length === 0
@@ -203,6 +210,9 @@ function sessionInfo(session: WebSession): FirebaseSessionInfo {
     subject: session.claims.subject,
     tenantId: session.claims.tenantId,
     roles: session.claims.roles,
+    ...(session.claims.displayName === undefined
+      ? {}
+      : { displayName: session.claims.displayName }),
     ...(session.claims.email === undefined ? {} : { email: session.claims.email })
   };
 }
@@ -242,6 +252,15 @@ export function installFirebaseAuthRoutes(
       }
       const decoded = await verifyIdToken(token, true);
       const claims = claimsFromFirebaseToken(decoded, options, requestedRole(request));
+      void Promise.resolve(options.userStore?.upsertIdentity({
+        subject: claims.subject,
+        tenantId: claims.tenantId,
+        actorType: claims.actorType ?? 'human_ui',
+        roles: claims.roles,
+        ...(claims.displayName === undefined ? {} : { displayName: claims.displayName }),
+        ...(claims.email === undefined ? {} : { email: claims.email }),
+        source: 'trusted_session'
+      })).catch(() => undefined);
       const now = Date.now();
       const session: WebSession = {
         sessionId: randomUUID(),

@@ -6,6 +6,7 @@
  *   - `FirestoreStateRepository` for the authoritative Shared_State.
  *   - `FirestoreInvocationLedger` for idempotency keys.
  *   - `FirestoreWebSessionStore` for browser sessions.
+ *   - `FirestoreUserStore` for tenant-scoped user profiles and action records.
  *
  * A composition root calls `createDurablePersistence()` and injects the
  * returned stores into the API/service. When Firestore is not configured, the
@@ -24,6 +25,7 @@ import {
   type FirestoreStateRepositoryOptions
 } from './firestoreStateRepository';
 import { FirestoreWebSessionStore } from './firestoreWebSessionStore';
+import { FirestoreUserStore } from './firestoreUserStore';
 import type { WebSessionStore } from '../auth/webSession';
 
 export * from './firestore';
@@ -31,6 +33,7 @@ export * from './stateSerialization';
 export { FirestoreInvocationLedger } from './firestoreInvocationLedger';
 export { FirestoreStateRepository } from './firestoreStateRepository';
 export { FirestoreWebSessionStore } from './firestoreWebSessionStore';
+export { FirestoreUserStore } from './firestoreUserStore';
 export * from './firestoreNormalizedState';
 
 export interface DurablePersistenceOptions extends FirestoreBootstrapOptions {
@@ -43,6 +46,7 @@ export interface DurablePersistenceOptions extends FirestoreBootstrapOptions {
     state?: string;
     ledger?: string;
     sessions?: string;
+    users?: string;
   };
   /** Tenant key used by normalized domain collections. */
   tenantId?: string;
@@ -59,6 +63,7 @@ export interface DurablePersistence {
   repository: FirestoreStateRepository;
   ledger: FirestoreInvocationLedger;
   sessionStore: FirestoreWebSessionStore;
+  userStore: FirestoreUserStore;
 }
 
 /**
@@ -124,5 +129,14 @@ export async function createDurablePersistence(
         : { collectionName: options.collections.sessions })
     });
 
-  return { firestore, repository, ledger, sessionStore };
+  const userStore = new FirestoreUserStore({
+    firestore,
+    ...(options.collections?.users === undefined
+      ? {}
+      : { collectionName: options.collections.users }),
+    onError: (error, context) =>
+      onError?.(error, { store: 'users', operation: context.operation })
+  });
+
+  return { firestore, repository, ledger, sessionStore, userStore };
 }

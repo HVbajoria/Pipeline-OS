@@ -93,6 +93,7 @@ import {
   type OperationTraceContext,
   type TraceIdentifierFactory
 } from './trace';
+import type { UserActivityStore } from './persistence/firestoreUserStore';
 
 /**
  * Context supplied to an operation implementation. `state` is always an
@@ -188,7 +189,8 @@ export interface OperationServiceOptions {
    * error and the queue proceeds. Default 20000ms; set to 0 to disable.
    */
   operationTimeoutMs?: number;
-  /** Optional deterministic trace IDs; default IDs are server-private UUIDs. */
+  /** Optional best-effort projection of trusted users and their actions. */
+  userActivityStore?: UserActivityStore;
   traceIdentifiers?: TraceIdentifierFactory;
 }
 
@@ -751,6 +753,7 @@ export class OperationService {
   private readonly approvalTtlMs: number;
   private readonly operationTimeoutMs: number;
   private readonly traceIdentifiers?: TraceIdentifierFactory;
+  private readonly userActivityStore?: UserActivityStore;
   /** Serializes ledger lookup, handler execution, and repository commit. */
   private executionTail: Promise<void> = Promise.resolve();
 
@@ -785,6 +788,7 @@ export class OperationService {
           ? options.operationTimeoutMs!
           : 20_000;
     this.traceIdentifiers = options.traceIdentifiers;
+    this.userActivityStore = options.userActivityStore;
     this.registerHandlers({ ...(options.handlers ?? {}), ...initialHandlers });
     this.registerOrchestrationAdapters(
       options.orchestrationAdapters ?? options.approvalAdapters ?? {}
@@ -1076,6 +1080,7 @@ export class OperationService {
         prepared?.metadata,
         legacy
       );
+      this.projectUserActivity(failure.activity, prepared?.principal);
 
       if (
         ledgerContext !== undefined &&
@@ -1338,6 +1343,7 @@ export class OperationService {
       entry.originalActivityId
     );
     this.repository.appendActivity(activity);
+    this.projectUserActivity(activity, prepared.principal);
   }
 
   private async executeAuthorized(
@@ -1443,6 +1449,7 @@ export class OperationService {
       'read'
     );
     const committed = this.repository.appendActivity(activity);
+    this.projectUserActivity(activity, prepared.principal);
     this.persistSuccessLedger(
       prepared,
       output as unknown as JsonObject,
@@ -1475,6 +1482,7 @@ export class OperationService {
       'read'
     );
     const committed = this.repository.appendActivity(activity);
+    this.projectUserActivity(activity, prepared.principal);
     this.persistSuccessLedger(
       prepared,
       output as unknown as JsonObject,
@@ -1533,6 +1541,7 @@ export class OperationService {
       return {
         output,
         activityId: activity.id,
+        activity,
         revision: draft.revision + 1
       };
     });
@@ -1543,6 +1552,7 @@ export class OperationService {
       result.activityId,
       result.revision
     );
+    this.projectUserActivity(result.activity, prepared.principal);
     return result.output;
   }
 
@@ -1689,7 +1699,7 @@ export class OperationService {
         approvalId
       );
       draft.activityLog.push(activity);
-      return { output, activityId: activity.id, revision: draft.revision + 1 };
+      return { output, activityId: activity.id, activity, revision: draft.revision + 1 };
     });
 
     this.persistSuccessLedger(
@@ -1698,6 +1708,7 @@ export class OperationService {
       result.activityId,
       result.revision
     );
+    this.projectUserActivity(result.activity, prepared.principal);
     return result.output;
   }
 
@@ -1844,7 +1855,7 @@ export class OperationService {
         approvalId
       );
       draft.activityLog.push(activity);
-      return { output, activityId: activity.id, revision: draft.revision + 1 };
+      return { output, activityId: activity.id, activity, revision: draft.revision + 1 };
     });
 
     if ('conflict' in result) throw PipelineError.from(result.conflict);
@@ -1854,6 +1865,7 @@ export class OperationService {
       result.activityId,
       result.revision
     );
+    this.projectUserActivity(result.activity, prepared.principal);
     return result.output;
   }
 
@@ -2090,7 +2102,7 @@ export class OperationService {
         approvalId
       );
       draft.activityLog.push(activity);
-      return { output, activityId: activity.id, revision: draft.revision + 1 };
+      return { output, activityId: activity.id, activity, revision: draft.revision + 1 };
     });
 
     if ('conflict' in result) throw PipelineError.from(result.conflict);
@@ -2100,6 +2112,7 @@ export class OperationService {
       result.activityId,
       result.revision
     );
+    this.projectUserActivity(result.activity, prepared.principal);
     return result.output;
   }
 
@@ -2280,7 +2293,7 @@ export class OperationService {
     approvalId?: ApprovalId,
     metadata?: InvocationMetadata,
     legacy = false
-  ): { activityId: string; revision: number } {
+  ): { activityId: string; revision: number; activity: ActivityLogEntry } {
     const prepared = {
       name: (name as OperationName),
       actor,
@@ -2309,7 +2322,21 @@ export class OperationService {
       approvalId
     );
     const snapshot = this.repository.appendActivity(activity);
-    return { activityId: activity.id, revision: snapshot.revision };
+    return { activityId: activity.id, revision: snapshot.revision, activity };
+  }
+
+  private projectUserActivity(
+    activity: ActivityLogEntry,
+    principal?: TrustedPrincipal
+  ): void {
+    if (this.userActivityStore === undefined) return;
+    try {
+      void Promise.resolve(
+        this.userActivityStore.recordActivity(activity, principal)
+      ).catch(() => undefined);
+    } catch {
+      // User projections are best-effort and must never change operation results.
+    }
   }
 
   private persistSuccessLedger(

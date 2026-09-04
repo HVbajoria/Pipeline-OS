@@ -140,6 +140,8 @@ export interface OidcClaimMapping {
   actorTypeClaim?: string;
   /** Claim to read the email from. Default `email`. */
   emailClaim?: string;
+  /** Claim to read the display name from. Default `name`. */
+  nameClaim?: string;
   /** Claim to read granted agent capabilities from. Default `capabilities`. */
   agentCapabilitiesClaim?: string;
   /** Claim to read consent scopes from. Default `consent_scopes`. */
@@ -206,6 +208,7 @@ export class OidcTokenVerifier implements OAuthTokenVerifier {
       rolesClaim: mapping.rolesClaim ?? 'roles',
       actorTypeClaim: mapping.actorTypeClaim ?? 'actor_type',
       emailClaim: mapping.emailClaim ?? 'email',
+      nameClaim: mapping.nameClaim ?? 'name',
       agentCapabilitiesClaim: mapping.agentCapabilitiesClaim ?? 'capabilities',
       consentScopesClaim: mapping.consentScopesClaim ?? 'consent_scopes',
       resourceIdsClaim: mapping.resourceIdsClaim ?? 'resource_ids'
@@ -240,12 +243,16 @@ export class OidcTokenVerifier implements OAuthTokenVerifier {
         : undefined;
 
     const emailRaw = payload[this.mapping.emailClaim];
+    const displayNameRaw = payload[this.mapping.nameClaim];
 
     const claims: VerifiedIdentityClaims = {
       subject,
       tenantId: tenantRaw,
       roles: asRoles(payload[this.mapping.rolesClaim]),
       ...(actorType === undefined ? {} : { actorType }),
+      ...(typeof displayNameRaw === 'string' && displayNameRaw.trim().length > 0
+        ? { displayName: displayNameRaw.trim() }
+        : {}),
       ...(typeof emailRaw === 'string' ? { email: emailRaw } : {}),
       ...((): { resourceIds?: VerifiedIdentityClaims['resourceIds'] } => {
         const ids = asResourceIds(payload[this.mapping.resourceIdsClaim]);

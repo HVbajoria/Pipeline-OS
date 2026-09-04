@@ -142,7 +142,8 @@ export async function createServerApp(
       resolvePrincipal: options.resolvePrincipal,
       idempotencyTtlMs: options.idempotencyTtlMs,
       approvalTtlMs: options.approvalTtlMs,
-      traceIdentifiers: options.traceIdentifiers
+      traceIdentifiers: options.traceIdentifiers,
+      userActivityStore: durablePersistence?.userStore
     });
   // Compose Firebase Authentication from environment when no host-specific
   // provider was injected. Production stays fail-closed unless this is
@@ -174,7 +175,25 @@ export async function createServerApp(
   ) {
     authProvider = {
       ...authProvider,
-      firebase: { ...authProvider.firebase, store: durablePersistence.sessionStore }
+      firebase: {
+        ...authProvider.firebase,
+        store: durablePersistence.sessionStore,
+        userStore: durablePersistence.userStore
+      }
+    };
+  }
+  if (
+    durablePersistence !== undefined &&
+    authProvider?.firebase !== undefined &&
+    authProvider.firebase.store !== undefined &&
+    authProvider.firebase.userStore === undefined
+  ) {
+    authProvider = {
+      ...authProvider,
+      firebase: {
+        ...authProvider.firebase,
+        userStore: durablePersistence.userStore
+      }
     };
   }
 
@@ -269,6 +288,7 @@ export async function startServer(options: ServerOptions = {}) {
     durablePersistence?.repository.stopRemoteSync();
     await durablePersistence?.repository.flush().catch(() => undefined);
     await durablePersistence?.ledger.flush().catch(() => undefined);
+    await durablePersistence?.userStore.flush().catch(() => undefined);
     await new Promise<void>((resolve) => server.close(() => resolve()));
   };
 

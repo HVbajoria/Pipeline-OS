@@ -195,6 +195,9 @@ export interface TrustedPrincipal {
   approvalCapabilities: readonly string[];
   /** Consent scopes granted by a trusted host, when applicable. */
   consentScopes: readonly string[];
+  /** Optional verified profile fields for server-side user projections. */
+  displayName?: string;
+  email?: string;
   source: PrincipalSource;
   policyVersion: string;
   tenantId?: string;
@@ -217,6 +220,9 @@ export interface TrustedPrincipalInput {
   resourceScopes?: readonly ResourceScope[];
   approvalCapabilities?: readonly string[];
   consentScopes?: readonly string[];
+  /** Optional verified profile fields; never populate these from request input. */
+  displayName?: string;
+  email?: string;
   source?: PrincipalSource;
   policyVersion?: string;
   tenantId?: string;
@@ -391,6 +397,8 @@ export function createTrustedPrincipal(input: TrustedPrincipalInput): TrustedPri
       'approvalCapabilities'
     ),
     consentScopes: uniqueStrings(input.consentScopes, 'consentScopes'),
+    ...(input.displayName === undefined ? {} : { displayName: input.displayName }),
+    ...(input.email === undefined ? {} : { email: input.email }),
     source:
       input.source ??
       (authenticated ? 'trusted_session' : 'unauthenticated'),
