@@ -31,6 +31,7 @@ export * from './stateSerialization';
 export { FirestoreInvocationLedger } from './firestoreInvocationLedger';
 export { FirestoreStateRepository } from './firestoreStateRepository';
 export { FirestoreWebSessionStore } from './firestoreWebSessionStore';
+export * from './firestoreNormalizedState';
 
 export interface DurablePersistenceOptions extends FirestoreBootstrapOptions {
   /** Reuse an existing Firestore instance instead of bootstrapping one. */
@@ -43,6 +44,12 @@ export interface DurablePersistenceOptions extends FirestoreBootstrapOptions {
     ledger?: string;
     sessions?: string;
   };
+  /** Tenant key used by normalized domain collections. */
+  tenantId?: string;
+  /** Prefix used by normalized domain collection names. */
+  normalizedCollectionPrefix?: string;
+  /** Disable normalized domain collections only for legacy migration hosts. */
+  normalizedPersistence?: boolean;
   /** Reports background persistence failures. Defaults to console.error. */
   onError?: (error: unknown, context: { store: string; operation: string }) => void;
 }
@@ -97,6 +104,13 @@ export async function createDurablePersistence(
     ...(options.crossInstanceSync === undefined
       ? {}
       : { crossInstanceSync: options.crossInstanceSync }),
+    ...(options.tenantId === undefined ? {} : { tenantId: options.tenantId }),
+    ...(options.normalizedCollectionPrefix === undefined
+      ? {}
+      : { normalizedCollectionPrefix: options.normalizedCollectionPrefix }),
+    ...(options.normalizedPersistence === undefined
+      ? {}
+      : { normalizedPersistence: options.normalizedPersistence }),
     onError: (error, context) =>
       onError?.(error, { store: 'repository', operation: context.operation })
   };

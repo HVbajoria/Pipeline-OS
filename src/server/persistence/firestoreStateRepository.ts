@@ -32,6 +32,11 @@ import {
   type SharedStateRepositoryOptions
 } from '../repository';
 import {
+  loadNormalizedState,
+  persistNormalizedState,
+  type FirestoreNormalizedStateOptions
+} from './firestoreNormalizedState';
+import {
   deserializeStateFromStorage,
   isSerializedSharedState,
   serializeStateForStorage
@@ -53,12 +58,22 @@ export interface FirestoreStateRepositoryOptions
   crossInstanceSync?: boolean;
   /** Reports background persistence failures without breaking the sync path. */
   onError?: (error: unknown, context: { operation: string }) => void;
+  /** Enable queryable tenant-scoped collections alongside the legacy snapshot. */
+  normalizedPersistence?: boolean;
+  /** Tenant used for normalized collection records. */
+  tenantId?: string;
+  /** Prefix for normalized top-level collection names. */
+  normalizedCollectionPrefix?: string;
 }
 
 export class FirestoreStateRepository extends SharedStateRepository {
   private readonly docRef: DocumentReference;
+  private readonly firestore: Firestore;
   private readonly onError?: FirestoreStateRepositoryOptions['onError'];
+  private readonly normalizedOptions: FirestoreNormalizedStateOptions;
+  private readonly normalizedPersistence: boolean;
   private readonly pending = new Set<Promise<void>>();
+  private writeQueue: Promise<void> = Promise.resolve();
   /** Revision this instance last persisted, to ignore its own onSnapshot echo. */
   private lastWrittenRevision = -1;
   private unsubscribeRemote?: () => void;
@@ -69,8 +84,16 @@ export class FirestoreStateRepository extends SharedStateRepository {
   ) {
     super(seed, options);
     const collectionName = options.collectionName ?? DEFAULT_COLLECTION;
+    this.firestore = options.firestore;
     this.docRef = options.firestore.collection(collectionName).doc(STATE_DOCUMENT_ID);
     this.onError = options.onError;
+    this.normalizedPersistence = options.normalizedPersistence !== false;
+    this.normalizedOptions = {
+      ...(options.tenantId === undefined ? {} : { tenantId: options.tenantId }),
+      ...(options.normalizedCollectionPrefix === undefined
+        ? {}
+        : { collectionPrefix: options.normalizedCollectionPrefix })
+    };
     this.lastWrittenRevision = this.getRevision();
 
     // Persist the initial (seed or hydrated) state so the document always
@@ -101,13 +124,29 @@ export class FirestoreStateRepository extends SharedStateRepository {
     const docRef = options.firestore
       .collection(collectionName)
       .doc(STATE_DOCUMENT_ID);
-    const snapshot = await docRef.get();
 
     let seed: RepositorySeed | undefined = options.seed;
-    if (snapshot.exists) {
-      const data = snapshot.data();
-      if (isSerializedSharedState(data)) {
-        seed = deserializeStateFromStorage(data) as unknown as RepositorySeed;
+    if (options.normalizedPersistence !== false) {
+      try {
+        const normalized = await loadNormalizedState(options.firestore, {
+          ...(options.tenantId === undefined ? {} : { tenantId: options.tenantId }),
+          ...(options.normalizedCollectionPrefix === undefined
+            ? {}
+            : { collectionPrefix: options.normalizedCollectionPrefix })
+        });
+        if (normalized !== undefined) seed = normalized as unknown as RepositorySeed;
+      } catch (error) {
+        options.onError?.(error, { operation: 'hydrate-normalized' });
+      }
+    }
+
+    if (seed === options.seed || seed === undefined) {
+      const snapshot = await docRef.get();
+      if (snapshot.exists) {
+        const data = snapshot.data();
+        if (isSerializedSharedState(data)) {
+          seed = deserializeStateFromStorage(data) as unknown as RepositorySeed;
+        }
       }
     }
 
@@ -134,12 +173,22 @@ export class FirestoreStateRepository extends SharedStateRepository {
       snapshot.revision
     );
     const serialized = serializeStateForStorage(snapshot);
-    const work = this.docRef
-      .set(serialized as unknown as Record<string, unknown>)
+    const work = this.writeQueue
+      .then(() => Promise.all([
+        this.docRef.set(serialized as unknown as Record<string, unknown>),
+        ...(this.normalizedPersistence
+          ? [persistNormalizedState(
+              this.firestore,
+              snapshot,
+              this.normalizedOptions
+            )]
+          : [])
+      ]))
       .then(() => undefined)
       .catch((error) => {
         this.onError?.(error, { operation });
       });
+    this.writeQueue = work;
     this.pending.add(work);
     void work.finally(() => this.pending.delete(work));
   }
