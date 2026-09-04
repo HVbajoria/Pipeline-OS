@@ -75,7 +75,7 @@ export function getAppTourSteps(includeDocumentation = false): Step[] {
       target: TOUR_TARGETS.resetDemo,
       title: 'Reset the deterministic demo',
       content:
-        'Reset DB restores the seeded requisition, candidates, panel, catalogs, and empty workflow collections. It is useful for replaying the canonical flow; repository revisions remain monotonic for synchronizing clients.',
+        'Reset DB restores the seeded requisition, eight synthetic candidates, panel, catalogs, and a populated Kanban with linked interview, offer, and onboarding records. It is useful for replaying the video story; repository revisions remain monotonic for synchronizing clients.',
       placement: 'top'
     },
     {

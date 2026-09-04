@@ -240,9 +240,25 @@ The Hiring Manager Portal can load the role-specific interview kit, inspect cand
 
 Documentation renders the same 32 `OPERATION_REGISTRY` descriptors used at runtime. Each entry shows its mutation/read-only/plan/approval classification, description, input/output JSON Schema, WebMCP annotations, required capability, approval policy, and the current actor-scoped manifest decision. This view is also the optional final spotlight in the guided tour when the Documentation role is active.
 
+### Hosted demo dataset
+
+The hosted application starts with the deterministic `createDemoSeed()` dataset so the Recruiter → Candidate flow Kanban is immediately presentation-ready. It uses the Indian-context **Senior Backend Engineer** role and eight synthetic candidates distributed across the lifecycle:
+
+| Column | Candidate | Demo record |
+| --- | --- | --- |
+| Applied | Ananya Sharma and Nikhil Joshi | Two fresh applications ready to screen |
+| Screened | Rohan Mehta | Explainable screening score is already persisted |
+| Interviewing | Kavya Iyer | A panel interview is already booked |
+| Offer sent | Aarav Singh | INR 23,00,000 offer is sent |
+| Offer accepted | Meera Nair | INR 24,00,000 offer, clear background check, and benefits |
+| Onboarding | Aditya Rao | INR 25,00,000 offer with a 1/3-complete checklist |
+| Rejected | Ishita Verma | Terminal pre-offer outcome for the audit story |
+
+All records are synthetic, deterministic, and linked to `job-1`/`panel-1`. **Reset demo state** restores this populated Kanban and clears the activity log. The lower-level `createSeed()` factory remains intentionally empty for canonical tests and isolated workflow examples.
+
 ### Canonical demo flow
 
-The seeded path is ready to replay after **Reset DB (Demo)**:
+The populated hosted dataset can be explored immediately. To demonstrate a fresh end-to-end application, use Ananya Sharma in Candidate view or reset the demo and follow the flow below; existing demo applications are preserved only until an explicit reset.
 
 1. Start with `job-1`, **Senior Backend Engineer**, an open Engineering requisition with an INR 18,00,000–26,00,000 band and `panel-1`.
 2. In Candidate view, submit `cand-1`'s resume to `job-1` (`submit_application`).
@@ -803,7 +819,7 @@ That step is intentionally conditional. Switch to Documentation and click Start 
 
 ### The demo contains old records
 
-Click **Reset DB (Demo)**. Reset restores `job-1`, the three seeded candidates, `panel-1`, deterministic availability/catalogs/templates, empty workflow collections, and an empty activity log. The revision number may be higher after reset by design; clients use it to converge rather than infer that records are stale.
+Click **Reset DB (Demo)**. Reset restores `job-1`, the eight synthetic Indian-context candidates, `panel-1`, deterministic availability/catalogs/templates, the populated Kanban demo applications, linked interview/offer/onboarding records, and an empty activity log. The revision number may be higher after reset by design; clients use it to converge rather than infer that records are stale.
 
 ### A production start serves the wrong mode
 
