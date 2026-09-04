@@ -123,7 +123,7 @@ describe('Phase C operation contracts, errors, activity, and state', () => {
       seed: seedWithOffer('applied').seed
     });
     const service = new OperationService(repository, phaseCHandlers);
-    const input = { applicationId: 'phase-c-application', compAmount: 200000 };
+    const input = { applicationId: 'phase-c-application', compAmount: 3000000 };
     const output = await service.invoke('generate_offer', input, actor);
     const state = repository.read();
     const offer = state.offers.get(output.offerId);
@@ -133,13 +133,13 @@ describe('Phase C operation contracts, errors, activity, and state', () => {
       id: 'offer-1',
       applicationId: input.applicationId,
       compAmount: input.compAmount,
-      currency: 'USD',
+      currency: 'INR',
       status: 'draft',
       counterAmount: null,
       sentAt: null,
       respondedAt: null,
       compensationWarning:
-        'Compensation amount 200000 is outside the USD band of 160000-190000.'
+        'Compensation amount 3000000 is outside the INR band of 1800000-2600000.'
     });
     expectSingleAudit(repository, 'generate_offer', input, output);
   });
@@ -488,7 +488,7 @@ describe('Phase C operation contracts, errors, activity, and state', () => {
       seed: seedWithOffer('applied').seed
     });
     const service = new OperationService(repository, phaseCHandlers);
-    const input = { applicationId: 'phase-c-application', compAmount: 175000 };
+    const input = { applicationId: 'phase-c-application', compAmount: 2200000 };
     const output = await service.invoke('generate_offer', input, actor);
     const offer = repository.read().offers.get(output.offerId);
 
@@ -496,7 +496,7 @@ describe('Phase C operation contracts, errors, activity, and state', () => {
     expect(offer).toMatchObject({
       applicationId: input.applicationId,
       compAmount: input.compAmount,
-      currency: 'USD',
+      currency: 'INR',
       status: 'draft',
       counterAmount: null,
       sentAt: null,

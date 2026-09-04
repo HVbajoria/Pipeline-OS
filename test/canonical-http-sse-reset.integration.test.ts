@@ -614,7 +614,7 @@ describe('Task 8.4: canonical HTTP, SSE, reset, and hydration contracts', () => 
 
       const offer = await invoke(
         'generate_offer',
-        { applicationId: applicationOutput.applicationId, compAmount: 175000 },
+        { applicationId: applicationOutput.applicationId, compAmount: 2200000 },
         actorFor(12)
       );
       expectOutputKeys(offer.result.body, ['offerId', 'status']);
@@ -627,8 +627,8 @@ describe('Task 8.4: canonical HTTP, SSE, reset, and hydration contracts', () => 
         {
           id: offerId,
           applicationId: applicationOutput.applicationId,
-          compAmount: 175000,
-          currency: 'USD',
+          compAmount: 2200000,
+          currency: 'INR',
           status: 'draft',
           counterAmount: null,
           sentAt: null,
