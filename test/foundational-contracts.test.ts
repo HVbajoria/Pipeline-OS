@@ -61,6 +61,7 @@ const EXPECTED_OPERATION_NAMES = [
 ] as const;
 
 const ADDITIVE_OPERATION_NAMES = [
+  'list_open_jobs',
   'plan_operation',
   'get_approval_card',
   'approve_operation_plan',

@@ -177,7 +177,7 @@ describe('MCP end-to-end over HTTP with a bearer token', () => {
     expect(String(result.headers['www-authenticate'])).toContain('Bearer');
   });
 
-  it('lists all 32 tools through tools/list with a valid bearer token', async () => {
+  it('lists all 33 tools through tools/list with a valid bearer token', async () => {
     const baseUrl = await startApi();
     const result = await request(
       baseUrl,
@@ -188,8 +188,9 @@ describe('MCP end-to-end over HTTP with a bearer token', () => {
     );
     expect(result.status).toBe(200);
     const body = result.body as { result?: { tools?: Array<{ name: string }> } };
-    expect(body.result?.tools?.length).toBe(32);
+    expect(body.result?.tools?.length).toBe(33);
     expect(body.result?.tools?.map((t) => t.name)).toContain('create_job_requisition');
+    expect(body.result?.tools?.map((t) => t.name)).toContain('list_open_jobs');
   });
 
   it('executes tools/call and produces the same audit entry as the /api (UI-click) path', async () => {

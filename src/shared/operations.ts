@@ -141,7 +141,6 @@ export type JSONSchema = JsonSchema;
 /** The exact set of operations exposed by PipelineOS. */
 export const OPERATION_NAMES = [
   'create_job_requisition',
-  'list_open_jobs',
   'search_candidates',
   'search_public_candidates',
   'get_candidate_profile',
@@ -161,6 +160,7 @@ export const OPERATION_NAMES = [
   'enroll_benefits',
   'generate_onboarding_checklist',
   'get_onboarding_status',
+  'list_open_jobs',
   'plan_operation',
   'get_approval_card',
   'approve_operation_plan',
@@ -1601,42 +1601,6 @@ export const OPERATION_REGISTRY = {
     }
   ),
 
-  list_open_jobs: operationDescriptor(
-    'list_open_jobs',
-    'List open jobs with the exact job IDs required by job-specific tools such as answer_candidate_faq.',
-    true,
-    {
-      type: 'object',
-      properties: {},
-      additionalProperties: false
-    },
-    {
-      type: 'object',
-      properties: {
-        jobs: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              jobId: idSchema,
-              title: requiredStringSchema,
-              department: requiredStringSchema,
-              requirements: {
-                type: 'array',
-                items: requiredStringSchema
-              },
-              compBand: compensationBandSchema
-            },
-            required: ['jobId', 'title', 'department', 'requirements', 'compBand'],
-            additionalProperties: false
-          }
-        }
-      },
-      required: ['jobs'],
-      additionalProperties: false
-    }
-  ),
-
   search_candidates: operationDescriptor(
     'search_candidates',
     'Search and rank candidates by skills, keywords, and experience level.',
@@ -2214,6 +2178,42 @@ export const OPERATION_REGISTRY = {
         'taskCompletion',
         'completionPercentage'
       ],
+      additionalProperties: false
+    }
+  ),
+
+  list_open_jobs: operationDescriptor(
+    'list_open_jobs',
+    'List open jobs with the exact job IDs required by job-specific tools such as answer_candidate_faq.',
+    true,
+    {
+      type: 'object',
+      properties: {},
+      additionalProperties: false
+    },
+    {
+      type: 'object',
+      properties: {
+        jobs: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              jobId: idSchema,
+              title: requiredStringSchema,
+              department: requiredStringSchema,
+              requirements: {
+                type: 'array',
+                items: requiredStringSchema
+              },
+              compBand: compensationBandSchema
+            },
+            required: ['jobId', 'title', 'department', 'requirements', 'compBand'],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ['jobs'],
       additionalProperties: false
     }
   ),
