@@ -71,12 +71,23 @@ function SignedOutRoutes({ error }: { error?: string }) {
   );
 }
 
+function replaceWithWorkspaceRoot(): void {
+  if (
+    window.location.pathname !== '/' ||
+    window.location.search.length > 0 ||
+    window.location.hash.length > 0
+  ) {
+    window.history.replaceState(null, '', '/');
+  }
+}
+
 function AuthenticatedRoot() {
   const [state, setState] = useState<AuthState>({ status: 'loading' });
 
   useEffect(() => {
     if (!firebaseAuthenticationConfigured()) {
       if (import.meta.env.DEV) {
+        replaceWithWorkspaceRoot();
         setState({
           status: 'signed_in',
           session: {
@@ -108,7 +119,10 @@ function AuthenticatedRoot() {
           setState({ status: 'loading' });
           void establishServerSession(user)
             .then((session) => {
-              if (active) setState({ status: 'signed_in', session });
+              if (active) {
+                replaceWithWorkspaceRoot();
+                setState({ status: 'signed_in', session });
+              }
             })
             .catch((error: unknown) => {
               if (active) setState({ status: 'error', error: PipelineError.from(error).message });
@@ -140,7 +154,7 @@ function AuthenticatedRoot() {
           <h1 className="mt-6 text-xl font-bold">Authentication setup required</h1>
           <p className="mt-3 text-sm text-slate-600">{state.error}</p>
           <p className="mt-3 text-sm text-slate-600">
-            Enable Email/Password and Google in Firebase Authentication, configure the Firebase web settings in Render, and redeploy the service.
+            Email/password authentication is not configured for this deployment. Add the Firebase web settings in Render and redeploy the service.
           </p>
         </div>
       </main>
