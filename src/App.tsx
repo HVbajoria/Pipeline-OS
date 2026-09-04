@@ -8,6 +8,7 @@ import LivePublicJobsPanel from './components/LivePublicJobsPanel';
 import WorkflowCoordinatorPanel from './components/WorkflowCoordinatorPanel';
 import WorkflowStatusPanel from './components/WorkflowStatusPanel';
 import GitHubProspectsPanel from './components/GitHubProspectsPanel';
+import { AccessTooltip, ROLE_ACCESS_TOOLTIP } from './components/ui/access-tooltip';
 import PipelineLogo from './components/PipelineLogo';
 import { useStore } from './lib/store';
 import { projectActivityFeed, projectKanban } from './lib/viewModels';
@@ -251,6 +252,13 @@ const Navigation = ({ onStartTour, mobileOpen, onClose, session, onSignOut }: Na
     ['hiring-manager', FileText, 'Hiring Manager'],
     ['documentation', Book, 'Documentation']
   ] as const;
+  const canReset = session.roles.includes('recruiter') || session.roles.includes('admin');
+  const identityLabel = session.email ?? session.subject;
+  const identityRoles = session.roles.map((role) =>
+    role === 'hiring_manager' || role === 'hiring-manager'
+      ? 'Hiring manager'
+      : role.charAt(0).toUpperCase() + role.slice(1)
+  );
 
   return (
     <nav aria-label="Primary navigation" className={`app-nav${mobileOpen ? ' is-open' : ''}`}>
@@ -260,22 +268,44 @@ const Navigation = ({ onStartTour, mobileOpen, onClose, session, onSignOut }: Na
           <X className="h-4 w-4" />
         </button>
       </div>
+      <div data-tour="signed-in-identity" className="app-nav__identity">
+        <div className="app-nav__identity-heading">
+          <span className="app-nav__footer-label">Signed in</span>
+          {session.roles.includes('admin') && <span className="app-nav__admin-badge">Admin</span>}
+        </div>
+        <p className="app-nav__identity-email" title={identityLabel}>{identityLabel}</p>
+        <div className="app-nav__identity-roles" aria-label="Assigned roles">
+          {identityRoles.map((role) => <span key={role} className="app-nav__role-badge">{role}</span>)}
+        </div>
+        <button type="button" onClick={() => void signOut()} disabled={signingOut} className="app-nav__utility app-nav__signout">
+          <User className="h-4 w-4" /> {signingOut ? 'Signing out…' : 'Sign out'}
+        </button>
+      </div>
       <div data-tour="role-switcher" className="app-nav__workspace tour-role-switcher">
         <p className="app-nav__eyebrow">Workspace</p>
         <div className="app-nav__items">
-          {roles.map(([role, Icon, label]) => (
-            <button
-              type="button"
-              key={role}
-              onClick={() => { setRole(role); onClose(); }}
-              disabled={role !== 'documentation' && !session.roles.includes(role === 'hiring-manager' ? 'hiring_manager' : role) && !session.roles.includes('admin')}
-              data-tour={role === 'documentation' ? 'documentation-nav' : undefined}
-              aria-current={currentRole === role ? 'page' : undefined}
-              className="app-nav__item"
-            >
-              <Icon className="h-4 w-4" /> <span>{label}</span>
-            </button>
-          ))}
+          {roles.map(([role, Icon, label]) => {
+            const canAccess =
+              role === 'documentation' ||
+              session.roles.includes(role === 'hiring-manager' ? 'hiring_manager' : role) ||
+              session.roles.includes('admin');
+            const button = (
+              <button
+                type="button"
+                key={role}
+                onClick={() => { setRole(role); onClose(); }}
+                disabled={!canAccess}
+                data-tour={role === 'documentation' ? 'documentation-nav' : undefined}
+                aria-current={currentRole === role ? 'page' : undefined}
+                className="app-nav__item"
+              >
+                <Icon className="h-4 w-4" /> <span>{label}</span>
+              </button>
+            );
+            return canAccess
+              ? button
+              : <AccessTooltip key={role} message={ROLE_ACCESS_TOOLTIP}>{button}</AccessTooltip>;
+          })}
         </div>
       </div>
       <div className="app-nav__footer">
@@ -283,18 +313,18 @@ const Navigation = ({ onStartTour, mobileOpen, onClose, session, onSignOut }: Na
         <button type="button" onClick={onStartTour} data-tour="start-tour" className="app-nav__utility">
           <HelpCircle className="h-4 w-4" /> Start Tour
         </button>
-        <button type="button" onClick={() => void reset()} disabled={resetting} data-tour="reset-demo" className="app-nav__utility">
-          <Activity className="h-4 w-4" /> {resetting ? 'Resetting demo…' : 'Reset demo state'}
-        </button>
-        {resetError && <p className="app-nav__error" role="alert">{resetError}</p>}
-        <div className="mt-4 border-t border-slate-700 pt-4">
-          <p className="app-nav__footer-label">Signed in</p>
-          <p className="truncate text-xs text-slate-300">{session.email ?? session.subject}</p>
-          <p className="mt-1 text-xs text-slate-400">{session.roles.join(', ')}</p>
-          <button type="button" onClick={() => void signOut()} disabled={signingOut} className="app-nav__utility mt-2">
-            <User className="h-4 w-4" /> {signingOut ? 'Signing out…' : 'Sign out'}
+        {canReset ? (
+          <button type="button" onClick={() => void reset()} disabled={resetting} data-tour="reset-demo" className="app-nav__utility">
+            <Activity className="h-4 w-4" /> {resetting ? 'Resetting demo…' : 'Reset demo state'}
           </button>
-        </div>
+        ) : (
+          <AccessTooltip message={ROLE_ACCESS_TOOLTIP}>
+            <button type="button" disabled data-tour="reset-demo" className="app-nav__utility">
+              <Activity className="h-4 w-4" /> Reset demo state
+            </button>
+          </AccessTooltip>
+        )}
+        {resetError && <p className="app-nav__error" role="alert">{resetError}</p>}
       </div>
     </nav>
   );

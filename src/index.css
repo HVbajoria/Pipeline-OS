@@ -249,6 +249,64 @@ summary:focus-visible {
   border-bottom: 1px solid rgb(148 163 184 / 0.14);
 }
 
+.app-nav__identity {
+  margin: 0 12px;
+  padding: 14px 12px;
+  border: 1px solid rgb(148 163 184 / 0.16);
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgb(30 41 59 / 0.72), rgb(15 23 42 / 0.42));
+}
+
+.app-nav__identity-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.app-nav__identity-email {
+  margin: 0 0 9px;
+  overflow: hidden;
+  color: #f8fafc;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-nav__identity-roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.app-nav__role-badge,
+.app-nav__admin-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgb(147 197 253 / 0.2);
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: rgb(59 130 246 / 0.12);
+  color: #bfdbfe;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.app-nav__admin-badge {
+  border-color: rgb(251 191 36 / 0.35);
+  background: rgb(245 158 11 / 0.16);
+  color: #fde68a;
+}
+
+.app-nav__signout {
+  margin-top: 12px;
+  border-color: rgb(148 163 184 / 0.16);
+  background: rgb(15 23 42 / 0.28);
+}
+
 .app-nav__brand-mark {
   display: grid;
   width: 34px;
@@ -322,6 +380,45 @@ summary:focus-visible {
   border-color: rgb(148 163 184 / 0.12);
   background: rgb(148 163 184 / 0.10);
   color: #f8fafc;
+}
+
+.app-nav__item:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.access-tooltip {
+  position: relative;
+  display: block;
+  outline: none;
+}
+
+.access-tooltip__content {
+  position: absolute;
+  z-index: 80;
+  top: 50%;
+  left: calc(100% + 10px);
+  width: 250px;
+  transform: translateY(-50%) translateX(-4px);
+  border: 1px solid rgb(147 197 253 / 0.28);
+  border-radius: 9px;
+  padding: 9px 10px;
+  background: #172554;
+  box-shadow: 0 12px 28px rgb(2 6 23 / 0.28);
+  color: #dbeafe;
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 1.45;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+.access-tooltip:hover .access-tooltip__content,
+.access-tooltip:focus-visible .access-tooltip__content,
+.access-tooltip:focus-within .access-tooltip__content {
+  transform: translateY(-50%) translateX(0);
+  opacity: 1;
 }
 
 .app-nav__item[aria-current="page"] {

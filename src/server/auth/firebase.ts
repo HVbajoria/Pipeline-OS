@@ -38,6 +38,7 @@ import type { VerifiedIdentityClaims } from './identityClaims';
 const DEFAULT_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const DEFAULT_ROLE: AuthorizationRole = 'candidate';
 const DEFAULT_TENANT = 'pipelineos-demo';
+const PIPELINEOS_ADMIN_EMAIL = 'admin@pipelineos.com';
 
 export interface FirebaseAuthOptions
   extends Pick<FirestoreBootstrapOptions, 'projectId' | 'serviceAccount' | 'credentialsPath'> {
@@ -141,6 +142,14 @@ function firebaseRoles(
   return fallback === undefined ? [] : [fallback];
 }
 
+function isPipelineOSAdmin(token: DecodedIdToken): boolean {
+  return (
+    token.email_verified === true &&
+    typeof token.email === 'string' &&
+    token.email.trim().toLowerCase() === PIPELINEOS_ADMIN_EMAIL
+  );
+}
+
 function claimsFromFirebaseToken(
   token: DecodedIdToken,
   options: FirebaseAuthOptions,
@@ -153,7 +162,13 @@ function claimsFromFirebaseToken(
     throw new Error('Firebase user is missing a tenant claim');
   }
 
-  const roles = firebaseRoles(token, options.defaultRole, requested);
+  const resolvedRoles = firebaseRoles(token, options.defaultRole, requested);
+  // The email is trusted only after Firebase Admin verifies the token and the
+  // account's email address. Never grant admin from a browser request body or
+  // an unverified email claim.
+  const roles = isPipelineOSAdmin(token)
+    ? [...new Set([...resolvedRoles, 'admin'])] as AuthorizationRole[]
+    : resolvedRoles;
   if (roles.length === 0) {
     throw new Error('Firebase user is missing an authorized role claim');
   }
