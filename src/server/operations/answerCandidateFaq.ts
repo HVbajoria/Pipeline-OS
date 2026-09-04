@@ -26,7 +26,8 @@ export const answerCandidateFaq: OperationHandler<'answer_candidate_faq'> = (
     throw notFoundError(`Job ${jobId} was not found`, {
       recordType: 'Job_Requisition',
       recordId: jobId,
-      field: 'jobId'
+      field: 'jobId',
+      suggestedOperation: 'list_open_jobs'
     });
   }
 

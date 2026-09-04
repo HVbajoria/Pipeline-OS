@@ -24,6 +24,7 @@ import getRecruitingWorkflowStatus from './getRecruitingWorkflowStatus';
 import importPublicProspect from './importPublicProspect';
 import initiateBackgroundCheck from './initiateBackgroundCheck';
 import planOperation from './planOperation';
+import listOpenJobs from './listOpenJobs';
 import proposeInterviewSlots from './proposeInterviewSlots';
 import rejectOperationPlan from './rejectOperationPlan';
 import respondToOffer from './respondToOffer';
@@ -49,6 +50,7 @@ export const defaultOperationAdapters = approvalOperationAdapters;
 /** Canonical server composition for all descriptors in the shared registry. */
 export const defaultOperationHandlers: OperationHandlerMap = {
   create_job_requisition: createJobRequisition,
+  list_open_jobs: listOpenJobs,
   search_candidates: searchCandidates,
   search_public_candidates: searchPublicCandidates,
   get_candidate_profile: getCandidateProfile,

@@ -141,6 +141,7 @@ export type JSONSchema = JsonSchema;
 /** The exact set of operations exposed by PipelineOS. */
 export const OPERATION_NAMES = [
   'create_job_requisition',
+  'list_open_jobs',
   'search_candidates',
   'search_public_candidates',
   'get_candidate_profile',
@@ -187,6 +188,7 @@ export type PlanableOperationName = (typeof PLANABLE_OPERATION_NAMES)[number];
 /** Stable implementation keys used by the server operation dispatcher. */
 export const OPERATION_IMPLEMENTATION_KEYS = {
   create_job_requisition: 'createJobRequisition',
+  list_open_jobs: 'listOpenJobs',
   search_candidates: 'searchCandidates',
   search_public_candidates: 'searchPublicCandidates',
   get_candidate_profile: 'getCandidateProfile',
@@ -236,6 +238,20 @@ export interface CreateJobRequisitionInput {
 
 export interface CreateJobRequisitionOutput {
   jobId: string;
+}
+
+export type ListOpenJobsInput = Record<string, never>;
+
+export interface OpenJobSummary {
+  jobId: string;
+  title: string;
+  department: string;
+  requirements: string[];
+  compBand: CompensationBand;
+}
+
+export interface ListOpenJobsOutput {
+  jobs: OpenJobSummary[];
 }
 
 export interface SearchCandidatesInput {
@@ -677,6 +693,7 @@ export type DiscoverCapabilitiesOutput = CapabilityManifest;
 /** Input types indexed by the canonical operation name. */
 export interface OperationInputMap {
   create_job_requisition: CreateJobRequisitionInput;
+  list_open_jobs: ListOpenJobsInput;
   search_candidates: SearchCandidatesInput;
   search_public_candidates: SearchPublicCandidatesInput;
   get_candidate_profile: GetCandidateProfileInput;
@@ -713,6 +730,7 @@ export interface OperationInputMap {
 /** Output types indexed by the canonical operation name. */
 export interface OperationOutputMap {
   create_job_requisition: CreateJobRequisitionOutput;
+  list_open_jobs: ListOpenJobsOutput;
   search_candidates: SearchCandidatesOutput;
   search_public_candidates: SearchPublicCandidatesOutput;
   get_candidate_profile: GetCandidateProfileOutput;
@@ -1583,6 +1601,42 @@ export const OPERATION_REGISTRY = {
     }
   ),
 
+  list_open_jobs: operationDescriptor(
+    'list_open_jobs',
+    'List open jobs with the exact job IDs required by job-specific tools such as answer_candidate_faq.',
+    true,
+    {
+      type: 'object',
+      properties: {},
+      additionalProperties: false
+    },
+    {
+      type: 'object',
+      properties: {
+        jobs: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              jobId: idSchema,
+              title: requiredStringSchema,
+              department: requiredStringSchema,
+              requirements: {
+                type: 'array',
+                items: requiredStringSchema
+              },
+              compBand: compensationBandSchema
+            },
+            required: ['jobId', 'title', 'department', 'requirements', 'compBand'],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ['jobs'],
+      additionalProperties: false
+    }
+  ),
+
   search_candidates: operationDescriptor(
     'search_candidates',
     'Search and rank candidates by skills, keywords, and experience level.',
@@ -1732,7 +1786,7 @@ export const OPERATION_REGISTRY = {
 
   answer_candidate_faq: operationDescriptor(
     'answer_candidate_faq',
-    'Answer a candidate question using only requisition data.',
+    'Answer a candidate question using only requisition data. Call list_open_jobs first to obtain the exact jobId.',
     true,
     {
       type: 'object',
