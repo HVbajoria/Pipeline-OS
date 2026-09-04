@@ -58,7 +58,7 @@ Validation notes:
 ## Checklist
 
 - [ ] I read [CONTRIBUTING.md](../../CONTRIBUTING.md), [SECURITY.md](../../SECURITY.md), and the [Code of Conduct](../../CODE_OF_CONDUCT.md).
-- [ ] The change is compatible with the proprietary license and authorized-collaborator policy.
+- [ ] The change is compatible with the MIT License and the project’s contribution guidelines.
 - [ ] I kept unrelated changes out of this PR.
 - [ ] I reviewed the staged diff and checked for secrets before pushing.
 - [ ] Documentation, schemas, operation descriptors, or deployment instructions were updated where needed.

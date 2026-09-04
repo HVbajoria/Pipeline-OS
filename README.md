@@ -15,6 +15,10 @@ PipelineOS demonstrates a shared human-and-agent recruiting system rather than a
 
 The application is a deterministic demo/reference implementation with an in-memory repository, not a production identity provider or durable database. Non-production demo requests accept only known seeded identities; the production composition root requires a trusted host resolver, and arbitrary actor headers are never authentication. Every authorized state projection is actor/resource scoped.
 
+## Why WebMCP?
+
+Before WebMCP, an agent could see a web page but could not reliably discover and invoke the page’s structured application actions. PipelineOS exposes recruiting operations as typed tools, allowing an agent to search, propose, coordinate, and report through the same workflow as a human user, while humans retain approval over consequential actions.
+
 ## Product architecture
 
 ```mermaid
@@ -730,18 +734,41 @@ pipelineos/
 
 ## License and scope
 
-This repository is a deterministic demonstration of a shared human-and-agent recruiting workflow. It intentionally uses an in-memory repository and demo actor identities. Replace the repository, actor resolver, and hosting configuration before treating it as a production recruiting system.
+PipelineOS is released under the [MIT License](LICENSE). The application remains a deterministic demonstration of a shared human-and-agent recruiting workflow and intentionally uses an in-memory repository by default. Replace the repository, actor resolver, and hosting configuration before treating it as a production recruiting system.
 
+## Judge access
+
+### Hosted deployment
+
+The hosted demo is available at [https://pipelineos-lkol.onrender.com](https://pipelineos-lkol.onrender.com). It uses Firebase Email/Password authentication:
+
+1. Open the hosted URL and choose **Create account**.
+2. Register with an email address and a password of at least six characters.
+3. Select a role from the signup form. The selected role is stored server-side in Firestore for that user; elevated `admin` access is never selectable from the browser.
+4. Sign in again with the same account after registration if the browser does not return to the workspace automatically.
+
+For the deterministic seeded recruiter flow, the maintainer should provision a dedicated Firebase judge account with recruiter claims and explicit `job-1`/candidate resource scope, then provide its email and temporary password in the hackathon submission form. Never commit judge credentials, Firebase Admin credentials, or session secrets to this repository. A fresh self-registered account is a valid access path, but it may not have the same seeded resource assignments as the maintainer-provisioned judge account.
+
+### Local deterministic demo
+
+The repository also includes a development-only demo path that does not require Firebase:
+
+```bash
+npm ci
+PERSISTENCE_BACKEND=memory npm run dev
+```
+
+Open `http://localhost:3000`. When Firebase browser configuration is absent, development mode enters the deterministic recruiter demo as `sarah-recruiter`. This fallback is intentionally disabled for production deployments.
 
 ## Firebase Authentication
 
-The production browser flow supports Firebase Email/Password and Google sign-in. The browser Firebase SDK signs the user in, then exchanges the verified ID token at `POST /auth/firebase/session`. PipelineOS verifies the token with the Firebase Admin SDK and creates the existing secure, `httpOnly` `pipelineos_session` cookie. API requests, state refreshes, and SSE synchronization use that cookie; tokens are not placed in URLs.
+The production browser flow supports Firebase Email/Password authentication. The browser Firebase SDK signs the user in, then exchanges the verified ID token at `POST /auth/firebase/session`. PipelineOS verifies the token with the Firebase Admin SDK and creates the existing secure, `httpOnly` `pipelineos_session` cookie. API requests, state refreshes, and SSE synchronization use that cookie; tokens are not placed in URLs.
 
-Enable **Email/Password** and **Google** under Firebase Console → Authentication → Sign-in method. Configure the browser values as `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_APP_ID`, and the optional storage/messaging values. These browser settings are public Firebase configuration, not Admin credentials.
+Enable **Email/Password** under Firebase Console → Authentication → Sign-in method. Configure the browser values as `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_APP_ID`, and the optional storage/messaging values. These browser settings are public Firebase configuration, not Admin credentials.
 
 The server additionally requires `FIREBASE_AUTH_ENABLED=true`, a strong `SESSION_SECRET` of at least 32 characters, and a server-only `FIREBASE_SERVICE_ACCOUNT` secret or Application Default Credentials. `FIREBASE_DEFAULT_TENANT_ID` and `FIREBASE_DEFAULT_ROLE=candidate` are safe first-time-user fallbacks. Do not use a default recruiter or admin role for a multi-user deployment.
 
-Authentication and authorization are separate. Recruiter, hiring-manager, interviewer, and admin access must be provisioned with Firebase Admin custom claims, for example:
+Authentication and authorization are separate. Recruiter, hiring-manager, interviewer, and admin access may be provisioned with Firebase Admin custom claims, for example:
 
 ```json
 {

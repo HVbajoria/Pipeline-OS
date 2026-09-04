@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "PipelineOS — a WebMCP/MCP-native recruiting platform where humans and agents drive the same hiring workflow through one operation path.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=20 <23"

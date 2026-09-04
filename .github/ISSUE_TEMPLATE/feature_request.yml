@@ -62,5 +62,5 @@ body:
           required: true
         - label: I have not included credentials, tokens, personal data, or confidential business information.
           required: true
-        - label: This request is compatible with the project's proprietary license and authorized-collaborator policy.
+        - label: This request is compatible with the project's MIT License and contribution guidelines.
           required: true

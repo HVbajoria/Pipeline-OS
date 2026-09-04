@@ -34,4 +34,4 @@ This Code of Conduct applies to project spaces and to conduct that materially af
 
 ## Acknowledgement
 
-By participating in this project, you agree to follow this Code of Conduct and the project’s [proprietary license](LICENSE).
+By participating in this project, you agree to follow this Code of Conduct and the project’s [MIT License](LICENSE).

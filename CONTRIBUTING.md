@@ -1,6 +1,6 @@
 # Contributing to PipelineOS
 
-Thank you for helping improve PipelineOS. This repository is proprietary and contributions are accepted from authorized collaborators or with prior written permission from the copyright holder. A pull request is not permission to use, copy, deploy, or redistribute the project.
+Thank you for helping improve PipelineOS. This project is released under the [MIT License](LICENSE), and contributions are welcome under the terms described below.
 
 ## Before you start
 
