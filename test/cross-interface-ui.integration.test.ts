@@ -221,7 +221,7 @@ describe('Task 7.10: cross-interface UI integration', () => {
       const appliedRecruiterView = renderRole('recruiter');
       expect(appliedCandidateView).toContain('data-application-status="applied"');
       expect(appliedRecruiterView).toContain('data-status="applied"');
-      expect(appliedRecruiterView).toContain('Alice Chen');
+      expect(appliedRecruiterView).toContain('Ananya Sharma');
       expect(appliedCandidateView).toContain('submit_application');
 
       await invokeUi('screen_candidate', { applicationId: application.applicationId }, recruiter);
@@ -421,9 +421,9 @@ describe('Task 7.10: cross-interface UI integration', () => {
         question: 'What is the compensation range?'
       }) as { answer: string; answeredFromData: boolean };
       expect(faq.answeredFromData).toBe(true);
-      expect(faq.answer).toContain('160000');
+      expect(faq.answer).toContain('1800000');
       expect(renderRole('candidate')).toContain('answeredFromData');
-      expect(renderRole('candidate')).toContain('160000');
+      expect(renderRole('candidate')).toContain('1800000');
 
       const availability = await invokeRead('check_interviewer_availability', {
         panelId: 'panel-1',

@@ -239,7 +239,7 @@ describe('Task 8.5: canonical server workflow and regression matrix', () => {
       expect.arrayContaining([
         expect.objectContaining({
           candidateId: 'cand-1',
-          name: 'Alice Chen',
+          name: 'Ananya Sharma',
           matchScore: expect.any(Number),
           rationale: expect.any(String)
         })

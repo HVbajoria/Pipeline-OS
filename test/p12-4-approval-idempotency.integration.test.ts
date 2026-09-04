@@ -350,8 +350,8 @@ describe('P12.4 deterministic approval, idempotency, and stale-state coverage', 
       calls += 1;
       return {
         id: 'cand-1',
-        name: 'Alice Chen',
-        email: 'alice@example.test',
+        name: 'Ananya Sharma',
+        email: 'ananya.sharma@example.test',
         resumeText: 'private resume text',
         skills: ['TypeScript'],
         experienceYears: 8,

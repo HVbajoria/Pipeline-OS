@@ -36,7 +36,7 @@ describe('OperationService audit contract', () => {
       actorId: 'test-recruiter'
     });
 
-    expect(repository.read().candidates.get('cand-1')?.name).toBe('Alice Chen');
+    expect(repository.read().candidates.get('cand-1')?.name).toBe('Ananya Sharma');
   });
 
   it('audits exactly one success or structured-error entry for every generated invocation', async () => {

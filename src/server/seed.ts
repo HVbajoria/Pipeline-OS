@@ -53,9 +53,9 @@ function createSeedJobs(): Map<string, JobRequisition> {
         title: 'Senior Backend Engineer',
         department: 'Engineering',
         requirements: ['Node.js', 'Express', 'PostgreSQL', 'AWS'],
-        compBand: { min: 160000, max: 190000, currency: 'USD' },
+        compBand: { min: 1800000, max: 2600000, currency: 'INR' },
         status: 'open',
-        createdBy: 'sarah-recruiter',
+        createdBy: 'priya-recruiter',
         createdAt: SEED_TIMESTAMP
       }
     ]
@@ -68,8 +68,8 @@ function createSeedCandidates(): Map<string, CandidateRecord> {
       'cand-1',
       {
         id: 'cand-1',
-        name: 'Alice Chen',
-        email: 'alice@example.com',
+        name: 'Ananya Sharma',
+        email: 'ananya.sharma@example.com',
         resumeText:
           'Experienced backend engineer with 8 years building scalable APIs.',
         skills: ['Node.js', 'TypeScript', 'AWS', 'Go'],
@@ -81,8 +81,8 @@ function createSeedCandidates(): Map<string, CandidateRecord> {
       'cand-2',
       {
         id: 'cand-2',
-        name: 'Bob Smith',
-        email: 'bob@example.com',
+        name: 'Rohan Mehta',
+        email: 'rohan.mehta@example.com',
         resumeText:
           'Frontend developer specializing in React and CSS animations.',
         skills: ['React', 'CSS', 'JavaScript'],
@@ -94,8 +94,8 @@ function createSeedCandidates(): Map<string, CandidateRecord> {
       'cand-3',
       {
         id: 'cand-3',
-        name: 'Charlie Davis',
-        email: 'charlie@example.com',
+        name: 'Kavya Iyer',
+        email: 'kavya.iyer@example.com',
         resumeText: 'Backend engineer focused on data engineering.',
         skills: ['Python', 'Django', 'SQL'],
         experienceYears: 5,
@@ -115,17 +115,17 @@ function createSeedPanels(): Map<string, InterviewPanel> {
         interviewers: [
           {
             id: 'interviewer-1',
-            name: 'Morgan Lee',
+            name: 'Arjun Nair',
             role: 'Engineering Manager'
           },
           {
             id: 'interviewer-2',
-            name: 'Jordan Patel',
+            name: 'Divya Krishnan',
             role: 'Senior Backend Engineer'
           },
           {
             id: 'interviewer-3',
-            name: 'Taylor Brooks',
+            name: 'Vikram Reddy',
             role: 'Platform Architect'
           }
         ]

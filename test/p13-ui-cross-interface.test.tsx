@@ -130,7 +130,7 @@ describe('P13 comparison/status UI projections', () => {
       revision: 3,
       candidates: [{
         candidateId: 'cand-1',
-        name: 'Alice Chen',
+        name: 'Ananya Sharma',
         rank: 1,
         totalScore: 90,
         scoreBreakdown: {

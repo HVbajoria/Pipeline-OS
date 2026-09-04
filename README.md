@@ -223,7 +223,7 @@ The Recruiter Dashboard is the operational control surface. It can:
 
 ### Candidate view
 
-The Candidate Portal uses the deterministic `cand-1` / Alice Chen demo identity. It can:
+The Candidate Portal uses the deterministic `cand-1` / Ananya Sharma demo identity. It can:
 
 1. View open jobs and submit one application per candidate/job pair.
 2. Ask a requisition-only FAQ question and see whether the answer came from data.
@@ -244,7 +244,7 @@ Documentation renders the same 32 `OPERATION_REGISTRY` descriptors used at runti
 
 The seeded path is ready to replay after **Reset DB (Demo)**:
 
-1. Start with `job-1`, **Senior Backend Engineer**, an open Engineering requisition with a USD 160,000–190,000 band and `panel-1`.
+1. Start with `job-1`, **Senior Backend Engineer**, an open Engineering requisition with an INR 18,00,000–26,00,000 band and `panel-1`.
 2. In Candidate view, submit `cand-1`'s resume to `job-1` (`submit_application`).
 3. In Recruiter view, screen the new application (`screen_candidate`).
 4. Check availability and propose the first three common slots (`check_interviewer_availability`, then `propose_interview_slots`).
@@ -380,7 +380,7 @@ A successful response is the operation's declared output, for example:
   "results": [
     {
       "candidateId": "cand-1",
-      "name": "Alice Chen",
+      "name": "Ananya Sharma",
       "matchScore": 75,
       "rationale": "Matched skills: AWS; matched query terms: backend."
     }

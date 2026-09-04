@@ -381,19 +381,19 @@ describe('Task 8.4: canonical HTTP, SSE, reset, and hydration contracts', () => 
         results: [
           {
             candidateId: 'cand-1',
-            name: 'Alice Chen',
+            name: 'Ananya Sharma',
             matchScore: 20,
             rationale: 'Matched skills: aws; 8 years of experience.'
           },
           {
             candidateId: 'cand-2',
-            name: 'Bob Smith',
+            name: 'Rohan Mehta',
             matchScore: 0,
             rationale: 'No queried skills matched; 3 years of experience.'
           },
           {
             candidateId: 'cand-3',
-            name: 'Charlie Davis',
+            name: 'Kavya Iyer',
             matchScore: 0,
             rationale: 'No queried skills matched; 5 years of experience.'
           }
@@ -407,8 +407,8 @@ describe('Task 8.4: canonical HTTP, SSE, reset, and hydration contracts', () => 
       );
       expect(profile.result.body).toEqual({
         id: 'cand-1',
-        name: 'Alice Chen',
-        email: 'alice@example.com',
+        name: 'Ananya Sharma',
+        email: 'ananya.sharma@example.com',
         resumeText: 'Experienced backend engineer with 8 years building scalable APIs.',
         skills: ['Node.js', 'TypeScript', 'AWS', 'Go'],
         experienceYears: 8,
@@ -470,7 +470,7 @@ describe('Task 8.4: canonical HTTP, SSE, reset, and hydration contracts', () => 
         actorFor(5)
       );
       expect(faq.result.body).toEqual({
-        answer: 'The compensation band is 160000–190000 USD.',
+        answer: 'The compensation band is 1800000–2600000 INR.',
         answeredFromData: true
       });
 

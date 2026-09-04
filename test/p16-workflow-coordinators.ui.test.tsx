@@ -112,7 +112,7 @@ describe('P16 workflow coordinator UI projection', () => {
 
     expect(markup).toContain('aria-label="Workflow coordinators"');
     expect(markup).toContain('data-workflow-role="recruiter"');
-    expect(markup).toContain('Alice Chen');
+    expect(markup).toContain('Ananya Sharma');
     expect(markup).toContain('data-coordinate-interview="propose"');
     expect(markup).toContain('Coordinate slots');
     expect(markup).toContain('data-coordinate-interview="book"');

@@ -306,7 +306,7 @@ describe('PipelineOS foundational contracts', () => {
     expect(job).toMatchObject({
       id: SEED_JOB_ID,
       status: 'open',
-      compBand: { min: 160000, max: 190000, currency: 'USD' },
+      compBand: { min: 1800000, max: 2600000, currency: 'INR' },
       createdAt: SEED_TIMESTAMP
     });
     expect(candidate!.resumeTextHistory).toEqual([]);
@@ -386,9 +386,9 @@ describe('PipelineOS foundational contracts', () => {
     expect([...first.jobs.keys()]).toEqual([SEED_JOB_ID]);
     expect([...first.candidates.keys()]).toEqual(['cand-1', 'cand-2', 'cand-3']);
     expect([...first.panels.keys()]).toEqual([SEED_PANEL_ID]);
-    expect(first.candidates.get('cand-1')?.name).toBe('Alice Chen');
-    expect(first.candidates.get('cand-2')?.name).toBe('Bob Smith');
-    expect(first.candidates.get('cand-3')?.name).toBe('Charlie Davis');
+    expect(first.candidates.get('cand-1')?.name).toBe('Ananya Sharma');
+    expect(first.candidates.get('cand-2')?.name).toBe('Rohan Mehta');
+    expect(first.candidates.get('cand-3')?.name).toBe('Kavya Iyer');
 
     expect(first.catalogs.startDate).toBe(START_DATE);
     expect(first.catalogs.planCatalog).toEqual({

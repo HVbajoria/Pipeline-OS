@@ -191,19 +191,19 @@ describe('Phase A operation contracts, errors, activity, and state', () => {
       results: [
         {
           candidateId: 'cand-1',
-          name: 'Alice Chen',
+          name: 'Ananya Sharma',
           matchScore: 40,
           rationale: 'Matched skills: node, js; 8 years of experience.'
         },
         {
           candidateId: 'cand-2',
-          name: 'Bob Smith',
+          name: 'Rohan Mehta',
           matchScore: 0,
           rationale: 'No queried skills matched; 3 years of experience.'
         },
         {
           candidateId: 'cand-3',
-          name: 'Charlie Davis',
+          name: 'Kavya Iyer',
           matchScore: 0,
           rationale: 'No queried skills matched; 5 years of experience.'
         }
@@ -495,7 +495,7 @@ describe('Phase A operation contracts, errors, activity, and state', () => {
       answer:
         'The role title is "Senior Backend Engineer". The department is "Engineering". ' +
         'The listed requirements are: Node.js, Express, PostgreSQL, AWS. ' +
-        'The compensation band is 160000–190000 USD.',
+        'The compensation band is 1800000–2600000 INR.',
       answeredFromData: true
     });
     expect(domainSnapshot(supportedContext.repository.read())).toEqual(supportedBefore);
