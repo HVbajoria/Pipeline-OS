@@ -1,7 +1,7 @@
 /**
  * Durable persistence composition for PipelineOS.
  *
- * This barrel assembles the three Firestore-backed stores that replace the
+ * This barrel assembles the four Firestore-backed stores that replace the
  * in-memory demo seams:
  *   - `FirestoreStateRepository` for the authoritative Shared_State.
  *   - `FirestoreInvocationLedger` for idempotency keys.
