@@ -55,6 +55,11 @@ export const MCP_TOOL_GUIDANCE: Record<OperationName, McpToolGuidance> = {
       'Recruiter tool. Open a new role by providing a title, department, a list of requirements, and a compensation band (min, max, currency). Returns the new jobId, which other tools use to reference the role.',
     confirmation: 'confirm'
   },
+  list_open_jobs: {
+    summary:
+      'Read-only discovery tool. List the currently open jobs and return each exact jobId, title, department, requirements, and compensation band. Call this before answer_candidate_faq or other job-specific tools when the jobId is not already known.',
+    confirmation: 'none'
+  },
   search_candidates: {
     summary:
       'Recruiter or hiring-manager tool. Find and rank existing PipelineOS candidates by free-text query, skills, and experience level. Use this before screening or comparing. Returns up to ten ranked candidates with a match score and a plain-language rationale.',
