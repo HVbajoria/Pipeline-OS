@@ -396,10 +396,11 @@ summary:focus-visible {
 .access-tooltip__content {
   position: absolute;
   z-index: 80;
-  top: 50%;
-  left: calc(100% + 10px);
-  width: 250px;
-  transform: translateY(-50%) translateX(-4px);
+  top: calc(100% + 8px);
+  left: 0;
+  width: 220px;
+  max-width: calc(100vw - 32px);
+  transform: translateY(-4px);
   border: 1px solid rgb(147 197 253 / 0.28);
   border-radius: 9px;
   padding: 9px 10px;
@@ -417,7 +418,7 @@ summary:focus-visible {
 .access-tooltip:hover .access-tooltip__content,
 .access-tooltip:focus-visible .access-tooltip__content,
 .access-tooltip:focus-within .access-tooltip__content {
-  transform: translateY(-50%) translateX(0);
+  transform: translateY(0);
   opacity: 1;
 }
 

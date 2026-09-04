@@ -197,7 +197,7 @@ function claimRequestedRole(): SelfSelectableRole | undefined {
 }
 
 export async function establishServerSession(user: User): Promise<FirebaseSession> {
-  const token = await user.getIdToken();
+  const token = await user.getIdToken(true);
   const requestedRole = claimRequestedRole();
   const response = await fetch('/auth/firebase/session', {
     method: 'POST',

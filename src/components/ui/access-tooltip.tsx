@@ -24,6 +24,7 @@ export function AccessTooltip({
       tabIndex={0}
       aria-describedby={tooltipId}
       aria-label={message}
+      title={message}
     >
       {children}
       <span id={tooltipId} role="tooltip" className="access-tooltip__content">
